@@ -22,6 +22,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
+    "@inkjs/ui": "2.0.0",
     "@tanstack/react-query": "5.100.9",
     "ink": "7.0.2",
     "react": "19.2.5",

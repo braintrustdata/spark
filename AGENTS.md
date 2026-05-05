@@ -2,9 +2,9 @@
 
 ## Project Overview
 
-`braintrust-wizard` is a TypeScript CLI/TUI for setting up Braintrust projects. It uses Ink with React for terminal rendering, TanStack Query for backend communication, Vitest for tests, ESLint for linting, Prettier for formatting, pnpm for package management, mise for tool pinning, and Rolldown for the build pipeline.
+`braintrust-wizard` is a TypeScript CLI/TUI for setting up Braintrust projects. It uses Ink with React for terminal rendering, Ink UI for reusable terminal controls, TanStack Query for backend communication, Vitest for tests, ESLint for linting, Prettier for formatting, pnpm for package management, mise for tool pinning, and Rolldown for the build pipeline.
 
-The project is currently an early bootstrap. The TUI renders a counter that increments when Enter is pressed and exits on Ctrl-C.
+The project is currently an early bootstrap. The TUI renders fullscreen in Ink's alternate screen and starts by asking whether the user already has a Braintrust account.
 
 ## Tooling
 
@@ -19,6 +19,7 @@ The project is currently an early bootstrap. The TUI renders a counter that incr
 ## Architecture Guidelines
 
 - Use React Context plus reducers for global TUI state management.
+- It is fine for reducer state to churn while the TUI evolves. Any TUI change may fully refactor the reducer state shape when the new shape makes more sense.
 - Use local React state for state that is truly local to a component or interaction.
 - Always use React Query to communicate with the backend.
 - Keep the Ink UI components focused on rendering and input handling.
