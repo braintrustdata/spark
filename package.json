@@ -16,6 +16,8 @@
   "scripts": {
     "start": "pnpm build && node dist/cli.js",
     "build": "rolldown -c",
+    "start:beau": "pnpm build:beau && node dist/cli.beau.js",
+    "build:beau": "rolldown -c rolldown.beau.config.mjs",
     "typings": "tsc --noEmit",
     "test": "vitest run",
     "lint": "eslint .",
@@ -23,7 +25,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@inkjs/ui": "2.0.0",
+    "@clack/prompts": "1.3.0",
     "@tanstack/react-query": "5.100.9",
     "ink": "7.0.2",
     "pngjs": "7.0.0",
@@ -40,7 +42,6 @@
     "eslint-plugin-react": "7.37.5",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.6.0",
-    "ink-testing-library": "4.0.0",
     "prettier": "3.8.3",
     "rolldown": "1.0.0-rc.18",
     "typescript": "6.0.3",

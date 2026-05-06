@@ -4,13 +4,13 @@ import { render as inkRender, type Instance } from "ink";
 import React, { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { App } from "../src/App";
-import { AppRoot } from "../src/AppRoot";
+import { App } from "../src/beau/App";
+import { AppRoot } from "../src/beau/AppRoot";
+import { ACCOUNT_QUESTION } from "../src/wizard-copy";
 
 const STRIP_PATTERN = /[▌▐]/;
 const LOGO_PATTERN = /[▀▄]/;
 const MIN_STRIP_MARKS_PER_LINE = 8;
-const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const LOGIN_BROWSER_PROMPT_START = "For the rest of the flow";
 const LOGIN_BROWSER_PROMPT_END = "open the browser?";
 

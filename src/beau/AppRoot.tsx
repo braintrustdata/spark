@@ -1,7 +1,7 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { useState, type ReactNode } from "react";
 
-import { createQueryClient } from "./query-client";
+import { createQueryClient } from "../query-client";
 import { TuiStateProvider } from "./tui-state";
 
 type AppRootProps = {

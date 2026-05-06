@@ -5,9 +5,10 @@ import { PNG } from "pngjs";
 
 const LOGO_HEIGHT = 7;
 const LOGO_WIDTH = 14;
-const LOGO_PATH = fileURLToPath(
-  new URL("../assets/braintrust-logo.png", import.meta.url),
-);
+const LOGO_PATHS = [
+  fileURLToPath(new URL("../../assets/braintrust-logo.png", import.meta.url)),
+  fileURLToPath(new URL("../assets/braintrust-logo.png", import.meta.url)),
+];
 const FALLBACK_LOGO_ROWS = [
   "    ███  ███   ",
   "  ████    ████ ",
@@ -52,45 +53,49 @@ function hasVisiblePixels({ column, row, isTopHalf, png }: AlphaSampleOptions) {
 }
 
 function loadLogoRows() {
-  try {
-    const png = PNG.sync.read(readFileSync(LOGO_PATH));
-    const rows: string[] = [];
+  for (const logoPath of LOGO_PATHS) {
+    try {
+      const png = PNG.sync.read(readFileSync(logoPath));
+      const rows: string[] = [];
 
-    for (let row = 0; row < LOGO_HEIGHT; row += 1) {
-      let line = "";
+      for (let row = 0; row < LOGO_HEIGHT; row += 1) {
+        let line = "";
 
-      for (let column = 0; column < LOGO_WIDTH; column += 1) {
-        const top = hasVisiblePixels({
-          column,
-          isTopHalf: true,
-          png,
-          row,
-        });
-        const bottom = hasVisiblePixels({
-          column,
-          isTopHalf: false,
-          png,
-          row,
-        });
+        for (let column = 0; column < LOGO_WIDTH; column += 1) {
+          const top = hasVisiblePixels({
+            column,
+            isTopHalf: true,
+            png,
+            row,
+          });
+          const bottom = hasVisiblePixels({
+            column,
+            isTopHalf: false,
+            png,
+            row,
+          });
 
-        if (top && bottom) {
-          line += "█";
-        } else if (top) {
-          line += "▀";
-        } else if (bottom) {
-          line += "▄";
-        } else {
-          line += " ";
+          if (top && bottom) {
+            line += "█";
+          } else if (top) {
+            line += "▀";
+          } else if (bottom) {
+            line += "▄";
+          } else {
+            line += " ";
+          }
         }
+
+        rows.push(line);
       }
 
-      rows.push(line);
+      return rows;
+    } catch {
+      continue;
     }
-
-    return rows;
-  } catch {
-    return FALLBACK_LOGO_ROWS;
   }
+
+  return FALLBACK_LOGO_ROWS;
 }
 
 const logoRows = loadLogoRows();

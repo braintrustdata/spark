@@ -1,11 +1,11 @@
 import { defineConfig } from "rolldown";
 
 export default defineConfig({
-  input: "src/cli.ts",
+  input: "src/beau/cli.tsx",
   output: {
     banner: "#!/usr/bin/env node",
     codeSplitting: false,
-    file: "dist/cli.js",
+    file: "dist/cli.beau.js",
     format: "esm",
     sourcemap: true,
   },

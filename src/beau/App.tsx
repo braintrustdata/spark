@@ -11,6 +11,12 @@ import {
 } from "./brand-colors";
 import { SignalStrips } from "./SignalStrips";
 import { useTuiDispatch, useTuiState } from "./tui-state";
+import {
+  ACCOUNT_QUESTION,
+  LOGIN_BROWSER_PROMPT,
+  WIZARD_DESCRIPTION,
+  WIZARD_TITLE,
+} from "../wizard-copy";
 
 const MIN_TERMINAL_HEIGHT = 8;
 const MIN_TERMINAL_WIDTH = 48;
@@ -20,11 +26,6 @@ const HEADER_MAX_WIDTH = 88;
 const HEADER_GAP_WIDTH = 2;
 const MAX_STRIP_ROWS = 8;
 const PROMPT_MAX_WIDTH = 64;
-const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
-const PROMPT_DESCRIPTION =
-  "Welcome to the Braintrust setup wizard. This wizard will guide you through setting up braintrust in your project.";
-const LOGIN_BROWSER_PROMPT =
-  "For the rest of the flow, we require you to be logged in, do you want to open the browser?";
 const STRIPS_TOP_MARGIN = 4;
 const SESSION_STRIP_BOTTOM_GAP = 2;
 const HEADER_CONTENT_HEIGHT = 9;
@@ -287,12 +288,12 @@ export function App() {
               <Box>
                 <Text color={promptColor}>▌ </Text>
                 <Text bold color={promptColor}>
-                  Braintrust Setup
+                  {WIZARD_TITLE}
                 </Text>
               </Box>
 
               <Box marginTop={1}>
-                <Text dimColor>{PROMPT_DESCRIPTION}</Text>
+                <Text dimColor>{WIZARD_DESCRIPTION}</Text>
               </Box>
 
               <Box flexDirection="column" marginTop={1}>
