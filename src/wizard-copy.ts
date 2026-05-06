@@ -10,10 +10,44 @@ export const LOGIN_BROWSER_PROMPT =
 
 export const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
 
-export function loginPlaceholderOutro(openBrowser: boolean) {
-  if (openBrowser) {
-    return "Browser login is not wired up yet, so no browser was opened.";
-  }
+export const WIZARD_SIGNIN_LINK_TITLE = "Braintrust sign-in";
 
-  return "Browser login skipped. Setup flow stops here for now.";
+export const WIZARD_SIGNIN_RESULT_TITLE = "Braintrust credentials";
+
+export const WIZARD_SIGNIN_COMPLETE_MESSAGE =
+  "Setup received Braintrust credentials.";
+
+export function wizardSigninLinkNote({
+  loginUrl,
+  expiresAt,
+}: {
+  readonly loginUrl: string;
+  readonly expiresAt: string;
+}) {
+  return [
+    "Open this link to sign in or sign up, then choose an organization and project:",
+    loginUrl,
+    "",
+    `Session expires at: ${expiresAt}`,
+  ].join("\n");
+}
+
+export function wizardSigninResultNote({
+  orgName,
+  orgId,
+  projectName,
+  projectId,
+  apiKey,
+}: {
+  readonly orgName: string;
+  readonly orgId: string;
+  readonly projectName: string;
+  readonly projectId: string;
+  readonly apiKey: string;
+}) {
+  return [
+    `Organization: ${orgName} (${orgId})`,
+    `Project: ${projectName} (${projectId})`,
+    `API key: ${apiKey}`,
+  ].join("\n");
 }

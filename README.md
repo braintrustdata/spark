@@ -29,3 +29,13 @@ pnpm lint
 pnpm format
 pnpm format:check
 ```
+
+## Backend
+
+The Clack wizard talks to `https://www.braintrust.dev` by default. Set
+`BRAINTRUST_WIZARD_BACKEND_URL` to point it at another Braintrust backend, for
+example:
+
+```sh
+BRAINTRUST_WIZARD_BACKEND_URL=http://localhost:3000 pnpm start
+```
