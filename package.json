@@ -9,10 +9,6 @@
     "braintrust-wizard": "./dist/cli.js"
   },
   "packageManager": "pnpm@10.33.3",
-  "engines": {
-    "node": ">=24.15.0 <25",
-    "pnpm": ">=10.33.3 <11"
-  },
   "scripts": {
     "start": "pnpm build && node dist/cli.js",
     "build": "rolldown -c",
