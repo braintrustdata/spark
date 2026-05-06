@@ -1,0 +1,25 @@
+{
+  "name": "@braintrust/bt-wizard-harness",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Restricted pi-coding-agent harness for the bt-wizard CLI: write/edit/grep + web search + bt only.",
+  "type": "module",
+  "bin": {
+    "bt-wizard-harness": "./bin/bt-wizard-harness.mjs"
+  },
+  "files": [
+    "bin",
+    "extensions"
+  ],
+  "dependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "typebox": "^1.1.24"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions/path-guard.ts",
+      "./extensions/bt-tool.ts",
+      "./extensions/curl-tool.ts"
+    ]
+  }
+}

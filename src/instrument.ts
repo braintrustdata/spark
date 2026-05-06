@@ -1,7 +1,25 @@
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir, platform } from "node:os";
 import { join } from "node:path";
+
+const HARNESS_PACKAGE_BIN =
+  "@braintrust/bt-wizard-harness/bin/bt-wizard-harness.mjs";
+
+function resolveHarnessPath():
+  | { readonly ok: true; readonly path: string }
+  | { readonly ok: false; readonly reason: string } {
+  try {
+    const require = createRequire(import.meta.url);
+    return { ok: true, path: require.resolve(HARNESS_PACKAGE_BIN) };
+  } catch (err) {
+    return {
+      ok: false,
+      reason: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
 
 export type InstallBtResult =
   | { readonly status: "already-installed" }
@@ -84,11 +102,6 @@ export type RunHarnessResult =
       readonly checked: readonly string[];
     };
 
-const HARNESS_PATH_CANDIDATES: readonly string[] = [
-  "/workspace/pi-mono-braintrust/packages/bt-wizard-harness/bin/bt-wizard-harness.mjs",
-  "/workspace/pi-mono-braintrust/packages/bt-wizard-harness/bin/bt-wizard-harness",
-];
-
 /**
  * Allocate a fresh result-file path that the harness will write the trace
  * permalink to. The path is also injected into the agent prompt via
@@ -115,40 +128,41 @@ export async function runHarness(args: {
   readonly braintrustApiKey: string;
   readonly resultFilePath: string;
 }): Promise<RunHarnessResult> {
+  const resolved = resolveHarnessPath();
+  if (!resolved.ok) {
+    return { status: "harness-not-found", checked: [resolved.reason] };
+  }
   const promptFile = writePromptToTemp(args.prompt).path;
   // Touch the result file so the agent knows the path is writable and so
   // a missing file vs. an empty file are distinguishable.
   writeFileSync(args.resultFilePath, "");
-  const checked: string[] = [];
-  for (const candidate of HARNESS_PATH_CANDIDATES) {
-    checked.push(candidate);
-    if (existsSync(candidate)) {
-      return new Promise((resolve) => {
-        const child = spawn("node", [candidate, "--prompt-file", promptFile], {
-          cwd: args.cwd,
-          env: {
-            ...process.env,
-            BRAINTRUST_API_KEY: args.braintrustApiKey,
-            BT_WIZARD_RESULT_FILE: args.resultFilePath,
-          },
-          stdio: "inherit",
-        });
-        child.on("error", () =>
-          resolve({
-            status: "completed",
-            exitCode: 1,
-            tracePermalink: readResultFile(args.resultFilePath),
-          }),
-        );
-        child.on("close", (code) =>
-          resolve({
-            status: "completed",
-            exitCode: code ?? 0,
-            tracePermalink: readResultFile(args.resultFilePath),
-          }),
-        );
-      });
-    }
-  }
-  return { status: "harness-not-found", checked };
+  return new Promise((resolve) => {
+    const child = spawn(
+      "node",
+      [resolved.path, "--prompt-file", promptFile],
+      {
+        cwd: args.cwd,
+        env: {
+          ...process.env,
+          BRAINTRUST_API_KEY: args.braintrustApiKey,
+          BT_WIZARD_RESULT_FILE: args.resultFilePath,
+        },
+        stdio: "inherit",
+      },
+    );
+    child.on("error", () =>
+      resolve({
+        status: "completed",
+        exitCode: 1,
+        tracePermalink: readResultFile(args.resultFilePath),
+      }),
+    );
+    child.on("close", (code) =>
+      resolve({
+        status: "completed",
+        exitCode: code ?? 0,
+        tracePermalink: readResultFile(args.resultFilePath),
+      }),
+    );
+  });
 }
