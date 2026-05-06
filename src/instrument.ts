@@ -137,19 +137,15 @@ export async function runHarness(args: {
   // a missing file vs. an empty file are distinguishable.
   writeFileSync(args.resultFilePath, "");
   return new Promise((resolve) => {
-    const child = spawn(
-      "node",
-      [resolved.path, "--prompt-file", promptFile],
-      {
-        cwd: args.cwd,
-        env: {
-          ...process.env,
-          BRAINTRUST_API_KEY: args.braintrustApiKey,
-          BT_WIZARD_RESULT_FILE: args.resultFilePath,
-        },
-        stdio: "inherit",
+    const child = spawn("node", [resolved.path, "--prompt-file", promptFile], {
+      cwd: args.cwd,
+      env: {
+        ...process.env,
+        BRAINTRUST_API_KEY: args.braintrustApiKey,
+        BT_WIZARD_RESULT_FILE: args.resultFilePath,
       },
-    );
+      stdio: "inherit",
+    });
     child.on("error", () =>
       resolve({
         status: "completed",
