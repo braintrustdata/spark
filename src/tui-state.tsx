@@ -2,6 +2,7 @@ import { createContext, type ReactNode, useContext, useReducer } from "react";
 
 type TuiState = {
   hasBraintrustAccount: boolean | null;
+  step: "account-question" | "login-browser-question";
 };
 
 type TuiAction = {
@@ -11,6 +12,7 @@ type TuiAction = {
 
 const initialState: TuiState = {
   hasBraintrustAccount: null,
+  step: "account-question",
 };
 
 const TuiStateContext = createContext<TuiState | undefined>(undefined);
@@ -24,6 +26,7 @@ function tuiReducer(state: TuiState, action: TuiAction): TuiState {
       return {
         ...state,
         hasBraintrustAccount: action.value,
+        step: "login-browser-question",
       };
   }
 }
