@@ -76,6 +76,7 @@ class TestStdin extends EventEmitter {
   setRawMode(isEnabled: boolean) {
     this.rawModeEnabled = isEnabled;
 
+
     return this;
   }
 
@@ -278,6 +279,7 @@ describe("App", () => {
     expect(easeLayoutTransitionProgress(1)).toBe(1);
   });
 
+
   it("renders the landing page with logo, account question, and strips", async () => {
     const { instance, lastFrame } = renderApp({ columns: 100, rows: 24 });
 
@@ -311,6 +313,7 @@ describe("App", () => {
     expect(stripLines(lastFrame()).join("\n")).not.toBe(initialStrips);
     expectFrameToFit(lastFrame(), 100, 24);
   });
+
 
   it("vertically centers the landing page content", async () => {
     const { instance, lastFrame } = renderApp({ columns: 100, rows: 24 });
