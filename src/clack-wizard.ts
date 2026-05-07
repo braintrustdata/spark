@@ -22,8 +22,6 @@ import {
   PROVIDER_KEY_QUESTION,
   PROVIDER_QUESTION,
   RUN_HARNESS_QUESTION,
-  SIGNIN_URL_FALLBACK,
-  SIGNUP_URL_FALLBACK,
   WIZARD_CANCEL_MESSAGE,
   WIZARD_TITLE,
   promptSavedNote,
@@ -112,8 +110,10 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
   // Open the signin/signup landing first as a UX hint while we kick off the
   // wizard sign-in session; the real login URL is shown right after.
-  const fallbackUrl = hasAccount ? SIGNIN_URL_FALLBACK : SIGNUP_URL_FALLBACK;
-  await deps.openBrowser(fallbackUrl).catch(() => false);
+  const fallbackPath = hasAccount ? "/signin" : "/signup-wizard";
+  await deps
+    .openBrowser(`${deps.options.appUrl}${fallbackPath}`)
+    .catch(() => false);
 
   const session = await deps.authClient.login({
     onLoginUrl: ({ loginUrl }) => {

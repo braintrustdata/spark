@@ -20,9 +20,6 @@ export function loginPlaceholderOutro(openBrowser: boolean): string {
 export const NOT_GIT_REPO_WARNING =
   "Heads up: this folder is not a git repository. The wizard may edit files; consider running it inside a checked-in repo.";
 
-export const SIGNIN_URL_FALLBACK = "https://www.braintrust.dev/signin";
-export const SIGNUP_URL_FALLBACK = "https://www.braintrust.dev/signup-wizard";
-
 export const DOCS_URL = "https://www.braintrust.dev/docs";
 
 export const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
