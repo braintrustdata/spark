@@ -127,6 +127,8 @@ export async function runHarness(args: {
   readonly cwd: string;
   readonly braintrustApiKey: string;
   readonly resultFilePath: string;
+  readonly providerEnvVar?: string;
+  readonly providerApiKey?: string;
 }): Promise<RunHarnessResult> {
   const resolved = resolveHarnessPath();
   if (!resolved.ok) {
@@ -143,6 +145,9 @@ export async function runHarness(args: {
         ...process.env,
         BRAINTRUST_API_KEY: args.braintrustApiKey,
         BT_WIZARD_RESULT_FILE: args.resultFilePath,
+        ...(args.providerEnvVar && args.providerApiKey
+          ? { [args.providerEnvVar]: args.providerApiKey }
+          : {}),
       },
       stdio: "inherit",
     });

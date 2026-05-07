@@ -66,6 +66,9 @@ const piArgs = [
   "--append-system-prompt",
   promptText,
   ...passthrough,
+  // Initial user message — triggers the agent immediately without waiting for
+  // user input. The full instructions are already in the system prompt above.
+  "Begin the Braintrust SDK installation task.",
 ];
 
 // Resolve the `pi` binary from the workspace's node_modules. Falling back to

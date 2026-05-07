@@ -16,7 +16,6 @@ import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
 import { LLM_PROVIDERS, type LlmProvider } from "./providers";
 import {
-  ACCOUNT_QUESTION,
   DOCS_URL,
   NOT_GIT_REPO_WARNING,
   PROVIDER_KEY_QUESTION,
@@ -103,18 +102,6 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     prompts.log.warn(NOT_GIT_REPO_WARNING);
   }
 
-  const hasAccount = unwrap(
-    prompts,
-    await prompts.confirm({ initialValue: true, message: ACCOUNT_QUESTION }),
-  );
-
-  // Open the signin/signup landing first as a UX hint while we kick off the
-  // wizard sign-in session; the real login URL is shown right after.
-  const fallbackPath = hasAccount ? "/signin" : "/signup-wizard";
-  await deps
-    .openBrowser(`${deps.options.appUrl}${fallbackPath}`)
-    .catch(() => false);
-
   const session = await deps.authClient.login({
     onLoginUrl: ({ loginUrl }) => {
       prompts.note(wizardLoginPrompt({ loginUrl }), "Login");
@@ -171,6 +158,8 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
         org: session.orgInfo.name,
         project: session.project.name,
         apiKey: session.apiKey,
+        providerEnvVar: provider.envVar,
+        providerApiKey: providerKey,
       });
     } else {
       const path = writePromptToTemp(
@@ -223,6 +212,8 @@ async function runInstrumentation(
     readonly org: string;
     readonly project: string;
     readonly apiKey: string;
+    readonly providerEnvVar?: string;
+    readonly providerApiKey?: string;
   },
 ): Promise<string | undefined> {
   const { prompts } = deps;
@@ -252,6 +243,8 @@ async function runInstrumentation(
     cwd: deps.cwd,
     braintrustApiKey: args.apiKey,
     resultFilePath,
+    providerEnvVar: args.providerEnvVar,
+    providerApiKey: args.providerApiKey,
   });
 
   if (harnessResult.status === "harness-not-found") {

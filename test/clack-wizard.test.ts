@@ -15,11 +15,7 @@ import {
   WizardCancelledError,
   type WizardDeps,
 } from "../src/clack-wizard";
-import {
-  ACCOUNT_QUESTION,
-  WIZARD_TITLE,
-  WIZARD_CANCEL_MESSAGE,
-} from "../src/wizard-copy";
+import { WIZARD_TITLE, WIZARD_CANCEL_MESSAGE } from "../src/wizard-copy";
 
 const CANCEL = Symbol("cancel");
 
@@ -160,7 +156,6 @@ describe("runClackWizard", () => {
   it("walks through happy path with no harness run", async () => {
     const customProvider = { id: "custom", label: "Custom", custom: true };
     const { prompts, events } = createPrompts({
-      confirms: [true],
       selects: [customProvider],
     });
     const deps = buildDeps({ prompts });
@@ -171,12 +166,11 @@ describe("runClackWizard", () => {
     expect(result.projectName).toBe("demo");
     expect(result.braintrustApiKey).toBe("bt-secret-key");
     expect(events[0]).toBe(`intro:${WIZARD_TITLE}`);
-    expect(events).toContain(`confirm:${ACCOUNT_QUESTION}`);
     expect(events).toContain("note:Login");
   });
 
-  it("cancels cleanly when the user aborts the account question", async () => {
-    const { prompts, events } = createPrompts({ confirms: [CANCEL] });
+  it("cancels cleanly when the user aborts the provider select", async () => {
+    const { prompts, events } = createPrompts({ selects: [CANCEL] });
     const deps = buildDeps({ prompts });
 
     await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
@@ -186,7 +180,7 @@ describe("runClackWizard", () => {
   it("warns when not in a git repo", async () => {
     const dir = mkdtempSync(join(tmpdir(), "bt-wizard-nogit-"));
     mkdirSync(join(dir, "child"), { recursive: true });
-    const { prompts, events } = createPrompts({ confirms: [CANCEL] });
+    const { prompts, events } = createPrompts({ selects: [CANCEL] });
     const deps = buildDeps({ prompts, cwd: join(dir, "child") });
 
     await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);

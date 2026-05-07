@@ -53,7 +53,10 @@ function extractPath(input: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-const GUARDED_TOOLS = new Set(["read", "write", "edit", "grep", "find", "ls"]);
+// Tools that can mutate the filesystem — strictly scoped to cwd.
+const WRITE_TOOLS = new Set(["write", "edit"]);
+// Read-only tools — also allowed to access pi's data dir (skills, extensions).
+const READ_TOOLS = new Set(["read", "grep", "find", "ls"]);
 
 export default function pathGuard(pi: ExtensionAPI) {
   const cwd = process.cwd();
@@ -70,13 +73,18 @@ export default function pathGuard(pi: ExtensionAPI) {
     (p): p is string => typeof p === "string",
   );
 
+  // pi stores skills, extensions, and config under ~/.agents/
+  const homeDir = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
+  const piDataDir = homeDir ? resolve(homeDir, ".agents") : undefined;
+
   pi.on("tool_call", async (event) => {
-    if (!GUARDED_TOOLS.has(event.toolName)) {
+    const isWrite = WRITE_TOOLS.has(event.toolName);
+    const isRead = READ_TOOLS.has(event.toolName);
+    if (!isWrite && !isRead) {
       return undefined;
     }
     const raw = extractPath(event.input as Record<string, unknown>);
     if (!raw) {
-      // Some tools take patterns or no path; let those through.
       return undefined;
     }
     const abs = isAbsolute(raw) ? resolve(raw) : resolve(cwdAbs, raw);
@@ -85,6 +93,10 @@ export default function pathGuard(pi: ExtensionAPI) {
       return undefined;
     }
     if (isUnderRoot(abs, cwdAbs)) {
+      return undefined;
+    }
+    // Allow read-only tools to access pi's data directory (skills, extensions).
+    if (isRead && piDataDir && isUnderRoot(abs, piDataDir)) {
       return undefined;
     }
     return {
