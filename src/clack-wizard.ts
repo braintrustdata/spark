@@ -1,14 +1,6 @@
 import { cwd as processCwd } from "node:process";
 
-import { DeviceFlowAuthClient } from "./auth";
-import {
-  BraintrustApiClient,
-  buildApiKeyName,
-  type DataPlane,
-  type Org,
-  type Project,
-  userHandle,
-} from "./braintrust-api";
+import { WizardSigninAuthClient } from "./auth";
 import { openBrowser } from "./browser";
 import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
 import { fuzzySelect } from "./fuzzy";
@@ -27,22 +19,16 @@ import {
   ACCOUNT_QUESTION,
   DOCS_URL,
   NOT_GIT_REPO_WARNING,
-  ORG_CREATE_DATA_PLANE_QUESTION,
-  ORG_CREATE_NAME_QUESTION,
-  ORG_SELECT_QUESTION,
-  PROJECT_CREATE_NAME_QUESTION,
-  PROJECT_SELECT_QUESTION,
   PROVIDER_KEY_QUESTION,
   PROVIDER_QUESTION,
   RUN_HARNESS_QUESTION,
-  SELECT_OR_CREATE_PROJECT_QUESTION,
   SIGNIN_URL_FALLBACK,
   SIGNUP_URL_FALLBACK,
   WIZARD_CANCEL_MESSAGE,
   WIZARD_TITLE,
-  deviceCodePrompt,
-  gitignoreNote,
   promptSavedNote,
+  gitignoreNote,
+  wizardLoginPrompt,
 } from "./wizard-copy";
 
 type SelectOption<T> = {
@@ -85,8 +71,7 @@ export type WizardDeps = {
   readonly env: NodeJS.ProcessEnv;
   readonly options: WizardOptions;
   readonly prompts: ClackWizardPrompts;
-  readonly authClient: DeviceFlowAuthClient;
-  readonly buildApi: (token: string) => BraintrustApiClient;
+  readonly authClient: WizardSigninAuthClient;
   readonly fuzzy: typeof fuzzySelect;
   readonly openBrowser: (url: string) => Promise<boolean>;
 };
@@ -125,34 +110,16 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     await prompts.confirm({ initialValue: true, message: ACCOUNT_QUESTION }),
   );
 
+  // Open the signin/signup landing first as a UX hint while we kick off the
+  // wizard sign-in session; the real login URL is shown right after.
   const fallbackUrl = hasAccount ? SIGNIN_URL_FALLBACK : SIGNUP_URL_FALLBACK;
-  // Open the signin/signup landing first; the device-flow URL also routes
-  // through there, so this is purely a UX hint while we kick off device flow.
   await deps.openBrowser(fallbackUrl).catch(() => false);
 
-  const tokenResp = await deps.authClient.login({
-    onPrompt: (info) => {
-      prompts.note(deviceCodePrompt(info), "Login");
+  const session = await deps.authClient.login({
+    onLoginUrl: ({ loginUrl }) => {
+      prompts.note(wizardLoginPrompt({ loginUrl }), "Login");
     },
     onTryOpenBrowser: (url) => deps.openBrowser(url),
-  });
-
-  const api = deps.buildApi(tokenResp.access_token);
-
-  const user = await api.currentUserAwaitingProvisioning();
-  const handle = userHandle(user);
-
-  const org = await selectOrCreateOrg(deps, api);
-  const project = await selectOrCreateProject(deps, api, org);
-
-  const existingNames = await api.listApiKeyNames(org.id);
-  const apiKeyName = buildApiKeyName({
-    userHandle: handle,
-    existingNames,
-  });
-  const apiKey = await api.createApiKey({
-    orgId: org.id,
-    name: apiKeyName,
   });
 
   const provider = await selectProvider(deps);
@@ -174,7 +141,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
   const gitRoot = findGitRoot(deps.cwd);
   if (gitRoot) {
-    const result = writeEnvBraintrust(gitRoot, apiKey.key);
+    const result = writeEnvBraintrust(gitRoot, session.apiKey);
     prompts.log.success(`Wrote ${result.envFilePath}`);
     prompts.log.info(
       gitignoreNote({
@@ -184,7 +151,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
   } else {
     prompts.log.info(
-      `BRAINTRUST_API_KEY=${apiKey.key}\nNot in a git repo — set this in your environment manually.`,
+      `BRAINTRUST_API_KEY=${session.apiKey}\nNot in a git repo — set this in your environment manually.`,
     );
   }
 
@@ -201,9 +168,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
     if (runIt) {
       tracePermalink = await runInstrumentation(deps, {
-        org: org.name,
-        project: project.name,
-        apiKey: apiKey.key,
+        org: session.orgInfo.name,
+        project: session.project.name,
+        apiKey: session.apiKey,
       });
     } else {
       const path = writePromptToTemp(
@@ -232,139 +199,10 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   );
 
   return {
-    orgName: org.name,
-    projectName: project.name,
-    braintrustApiKey: apiKey.key,
+    orgName: session.orgInfo.name,
+    projectName: session.project.name,
+    braintrustApiKey: session.apiKey,
   };
-}
-
-async function selectOrCreateOrg(
-  deps: WizardDeps,
-  api: BraintrustApiClient,
-): Promise<Org> {
-  const { prompts, options } = deps;
-  const orgs = await api.listOrgs();
-
-  if (options.orgName) {
-    const match = orgs.find((o) => o.name === options.orgName);
-    if (match) {
-      prompts.log.info(`Using --org ${match.name}`);
-      return match;
-    }
-    const available = orgs.map((o) => o.name).join(", ") || "(none)";
-    throw new Error(
-      `Org "${options.orgName}" not found. Available orgs: ${available}.`,
-    );
-  }
-
-  if (orgs.length === 0) {
-    return createOrgInteractive(deps, api);
-  }
-  if (orgs.length === 1) {
-    const only = orgs[0]!;
-    prompts.log.info(`Only one org available: ${only.name}`);
-    return only;
-  }
-  return deps.fuzzy({
-    message: ORG_SELECT_QUESTION,
-    choices: orgs.map((o) => ({ value: o, name: o.name })),
-  });
-}
-
-async function createOrgInteractive(
-  deps: WizardDeps,
-  api: BraintrustApiClient,
-): Promise<Org> {
-  const { prompts } = deps;
-  const name = unwrap(
-    prompts,
-    await prompts.text({ message: ORG_CREATE_NAME_QUESTION }),
-  );
-  const dataPlane = unwrap(
-    prompts,
-    await prompts.select<DataPlane>({
-      message: ORG_CREATE_DATA_PLANE_QUESTION,
-      options: [
-        { label: "United States", value: "us" },
-        { label: "European Union", value: "eu" },
-      ],
-    }),
-  );
-  const created = await api.createOrg({ orgName: name, dataPlane });
-  if (created.existed) {
-    prompts.log.info(`Reusing existing org "${name}".`);
-  } else {
-    prompts.log.success(`Created org "${name}".`);
-  }
-  // Refetch full org object so we have api_url etc.
-  const refreshed = await api.listOrgs();
-  const match = refreshed.find((o) => o.id === created.id);
-  if (!match) {
-    throw new Error(
-      `Created org ${created.id} but it isn't visible in /v1/organization`,
-    );
-  }
-  return match;
-}
-
-async function selectOrCreateProject(
-  deps: WizardDeps,
-  api: BraintrustApiClient,
-  org: Org,
-): Promise<Project> {
-  const { prompts, options } = deps;
-  const projects = await api.listProjects(org.id);
-
-  if (options.projectName) {
-    const match = projects.find((p) => p.name === options.projectName);
-    if (match) {
-      prompts.log.info(`Using --project ${match.name}`);
-      return match;
-    }
-    const available = projects.map((p) => p.name).join(", ") || "(none)";
-    throw new Error(
-      `Project "${options.projectName}" not found in org "${org.name}". Available projects: ${available}.`,
-    );
-  }
-
-  if (projects.length === 0) {
-    return createProjectInteractive(deps, api, org);
-  }
-
-  const action = unwrap(
-    prompts,
-    await prompts.select<"select" | "create">({
-      message: SELECT_OR_CREATE_PROJECT_QUESTION,
-      options: [
-        { label: "Select existing project", value: "select" },
-        { label: "Create a new project", value: "create" },
-      ],
-    }),
-  );
-
-  if (action === "create") {
-    return createProjectInteractive(deps, api, org);
-  }
-
-  return deps.fuzzy({
-    message: PROJECT_SELECT_QUESTION,
-    choices: projects.map((p) => ({ value: p, name: p.name })),
-  });
-}
-
-async function createProjectInteractive(
-  deps: WizardDeps,
-  api: BraintrustApiClient,
-  org: Org,
-): Promise<Project> {
-  const { prompts } = deps;
-  const name = unwrap(
-    prompts,
-    await prompts.text({ message: PROJECT_CREATE_NAME_QUESTION }),
-  );
-  const created = await api.createProject({ orgId: org.id, name });
-  prompts.log.success(`Created project "${created.name}".`);
-  return created;
 }
 
 async function selectProvider(deps: WizardDeps): Promise<LlmProvider> {
@@ -439,14 +277,13 @@ export type DefaultDepsArgs = {
 export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
   const cwd = args.cwd ?? processCwd();
   const env = args.env ?? process.env;
-  const authClient = new DeviceFlowAuthClient(args.options.appUrl);
+  const authClient = new WizardSigninAuthClient(args.options.appUrl);
   return {
     cwd,
     env,
     options: args.options,
     prompts: args.prompts,
     authClient,
-    buildApi: (token) => new BraintrustApiClient(args.options.apiUrl, token),
     fuzzy: fuzzySelect,
     openBrowser,
   };

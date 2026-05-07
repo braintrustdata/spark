@@ -1,6 +1,4 @@
 export type WizardOptions = {
-  readonly orgName: string | undefined;
-  readonly projectName: string | undefined;
   readonly apiUrl: string;
   readonly appUrl: string;
   readonly caCertPath: string | undefined;
@@ -17,8 +15,6 @@ const DEFAULT_APP_URL = "https://www.braintrust.dev";
 const HELP = `Usage: bt-wizard [options]
 
 Options:
-  -o, --org <ORG>            Override active org [env: BRAINTRUST_ORG_NAME]
-  -p, --project <PROJECT>    Override active project [env: BRAINTRUST_DEFAULT_PROJECT]
   --api-url <URL>            Override API URL [env: BRAINTRUST_API_URL]
   --app-url <URL>            Override app URL [env: BRAINTRUST_APP_URL]
   --ca-cert <PATH>           Path to PEM CA bundle [env: BRAINTRUST_CA_CERT; overrides SSL_CERT_FILE]
@@ -33,8 +29,6 @@ export function parseArgs(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
 ): ParsedArgs {
-  let orgName = env["BRAINTRUST_ORG_NAME"];
-  let projectName = env["BRAINTRUST_DEFAULT_PROJECT"];
   let apiUrl = env["BRAINTRUST_API_URL"] ?? DEFAULT_API_URL;
   let appUrl = env["BRAINTRUST_APP_URL"] ?? DEFAULT_APP_URL;
   let caCertPath = env["BRAINTRUST_CA_CERT"] ?? env["SSL_CERT_FILE"];
@@ -52,14 +46,6 @@ export function parseArgs(
       return v;
     };
     switch (arg) {
-      case "-o":
-      case "--org":
-        orgName = next();
-        break;
-      case "-p":
-      case "--project":
-        projectName = next();
-        break;
       case "--api-url":
         apiUrl = next();
         break;
@@ -82,8 +68,6 @@ export function parseArgs(
   return {
     help,
     options: {
-      orgName: orgName || undefined,
-      projectName: projectName || undefined,
       apiUrl: stripTrailingSlash(apiUrl),
       appUrl: stripTrailingSlash(appUrl),
       caCertPath: caCertPath || undefined,

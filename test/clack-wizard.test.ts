@@ -4,8 +4,11 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { DeviceFlowAuthClient } from "../src/auth";
-import { BraintrustApiClient } from "../src/braintrust-api";
+import {
+  type WizardSigninAuthClient,
+  type WizardSigninCompleteResult,
+  type WizardSigninEvents,
+} from "../src/auth";
 import {
   type ClackWizardPrompts,
   runClackWizard,
@@ -98,69 +101,67 @@ function createPrompts(inputs: FakePromptInputs) {
   return { prompts, events };
 }
 
+const DEFAULT_LOGIN_RESULT: WizardSigninCompleteResult = {
+  apiKey: "bt-secret-key",
+  orgInfo: {
+    id: "o1",
+    name: "acme",
+    api_url: "https://api.test",
+    proxy_url: null,
+    realtime_url: null,
+    is_universal_api: null,
+    git_metadata: null,
+  },
+  project: {
+    id: "p1",
+    name: "demo",
+    org_id: "o1",
+    description: null,
+  },
+};
+
 function buildDeps(args: {
   readonly prompts: ClackWizardPrompts;
-  readonly authClient?: DeviceFlowAuthClient;
-  readonly api?: BraintrustApiClient;
+  readonly authClient?: WizardSigninAuthClient;
   readonly cwd?: string;
 }): WizardDeps {
   const cwd = args.cwd ?? mkdtempSync(join(tmpdir(), "bt-wizard-test-"));
   const stubAuth =
     args.authClient ??
     ({
-      login: async () => ({ access_token: "tkn", token_type: "Bearer" }),
-    } as unknown as DeviceFlowAuthClient);
-  const stubApi =
-    args.api ??
-    ({
-      currentUser: async () => ({
-        id: "u1",
-        email: "alice@example.com",
-      }),
-      currentUserAwaitingProvisioning: async () => ({
-        id: "u1",
-        email: "alice@example.com",
-      }),
-      listOrgs: async () => [{ id: "o1", name: "acme" }],
-      listProjects: async () => [{ id: "p1", name: "demo", org_id: "o1" }],
-      listApiKeyNames: async () => [],
-      createApiKey: async () => ({
-        id: "k1",
-        name: "alice-created-by-bt-wizard0",
-        key: "bt-secret-key",
-      }),
-      createOrg: async () => ({ id: "o1", existed: false }),
-      createProject: async () => ({
-        id: "p1",
-        name: "demo",
-        org_id: "o1",
-      }),
-    } as unknown as BraintrustApiClient);
+      login: async (events: WizardSigninEvents) => {
+        events.onLoginUrl({
+          loginUrl: "https://app.test/app/cli-login/test-session",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        });
+        await events.onTryOpenBrowser(
+          "https://app.test/app/cli-login/test-session",
+        );
+        return DEFAULT_LOGIN_RESULT;
+      },
+    } as unknown as WizardSigninAuthClient);
 
   return {
     cwd,
     env: {},
     options: {
-      orgName: undefined,
-      projectName: undefined,
       apiUrl: "https://api.test",
       appUrl: "https://app.test",
       caCertPath: undefined,
     },
     prompts: args.prompts,
     authClient: stubAuth,
-    buildApi: () => stubApi,
     fuzzy: async ({ choices }) => choices[0]!.value,
     openBrowser: async () => true,
   };
 }
 
 describe("runClackWizard", () => {
-  it("walks through happy path with a single org+project and no harness run", async () => {
+  it("walks through happy path with no harness run", async () => {
     const customProvider = { id: "custom", label: "Custom", custom: true };
     const { prompts, events } = createPrompts({
       confirms: [true],
-      selects: ["select", customProvider],
+      selects: [customProvider],
     });
     const deps = buildDeps({ prompts });
 
@@ -171,6 +172,7 @@ describe("runClackWizard", () => {
     expect(result.braintrustApiKey).toBe("bt-secret-key");
     expect(events[0]).toBe(`intro:${WIZARD_TITLE}`);
     expect(events).toContain(`confirm:${ACCOUNT_QUESTION}`);
+    expect(events).toContain("note:Login");
   });
 
   it("cancels cleanly when the user aborts the account question", async () => {
@@ -189,93 +191,5 @@ describe("runClackWizard", () => {
 
     await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
     expect(events.some((e) => e.startsWith("warn:Heads up"))).toBe(true);
-  });
-
-  it("uses --org override and skips the org prompt when the org exists", async () => {
-    const customProvider = { id: "custom", label: "Custom", custom: true };
-    const { prompts, events } = createPrompts({
-      confirms: [true],
-      selects: ["select", customProvider],
-    });
-    const deps: WizardDeps = {
-      ...buildDeps({ prompts }),
-      options: {
-        orgName: "acme",
-        projectName: undefined,
-        apiUrl: "https://api.test",
-        appUrl: "https://app.test",
-        caCertPath: undefined,
-      },
-    };
-
-    const result = await runClackWizard(deps);
-
-    expect(result.orgName).toBe("acme");
-    expect(events.some((e) => e === "info:Using --org acme")).toBe(true);
-    expect(events.some((e) => e.startsWith("select:Which organization"))).toBe(
-      false,
-    );
-  });
-
-  it("fails when --org is set but the org does not exist", async () => {
-    const { prompts } = createPrompts({ confirms: [true] });
-    const deps: WizardDeps = {
-      ...buildDeps({ prompts }),
-      options: {
-        orgName: "missing-org",
-        projectName: undefined,
-        apiUrl: "https://api.test",
-        appUrl: "https://app.test",
-        caCertPath: undefined,
-      },
-    };
-
-    await expect(runClackWizard(deps)).rejects.toThrow(
-      /Org "missing-org" not found/,
-    );
-  });
-
-  it("uses --project override and skips the select-or-create prompt", async () => {
-    const customProvider = { id: "custom", label: "Custom", custom: true };
-    const { prompts, events } = createPrompts({
-      confirms: [true],
-      selects: [customProvider],
-    });
-    const deps: WizardDeps = {
-      ...buildDeps({ prompts }),
-      options: {
-        orgName: undefined,
-        projectName: "demo",
-        apiUrl: "https://api.test",
-        appUrl: "https://app.test",
-        caCertPath: undefined,
-      },
-    };
-
-    const result = await runClackWizard(deps);
-
-    expect(result.projectName).toBe("demo");
-    expect(events.some((e) => e === "info:Using --project demo")).toBe(true);
-    expect(events.some((e) => e.startsWith("select:Use an existing"))).toBe(
-      false,
-    );
-  });
-
-  it("fails when --project is set but the project does not exist in the chosen org", async () => {
-    const { prompts } = createPrompts({ confirms: [true] });
-    const deps: WizardDeps = {
-      ...buildDeps({ prompts }),
-      options: {
-        orgName: undefined,
-        projectName: "missing-project",
-        apiUrl: "https://api.test",
-        appUrl: "https://app.test",
-        caCertPath: undefined,
-      },
-    };
-
-    await expect(runClackWizard(deps)).rejects.toThrow(
-      /Project "missing-project" not found in org "acme"/,
-    );
   });
 });

@@ -6,7 +6,7 @@ export const WIZARD_DESCRIPTION =
 export const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 
 // Legacy copy used by the beau (Ink) variant. The Clack wizard uses
-// device-flow login and doesn't need this prompt.
+// browser-mediated wizard sign-in and doesn't need this prompt.
 export const LOGIN_BROWSER_PROMPT =
   "For the rest of the flow, we require you to be logged in, do you want to open the browser?";
 
@@ -26,19 +26,6 @@ export const SIGNUP_URL_FALLBACK = "https://www.braintrust.dev/signup-wizard";
 export const DOCS_URL = "https://www.braintrust.dev/docs";
 
 export const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
-
-export const SELECT_OR_CREATE_PROJECT_QUESTION =
-  "Use an existing project or create a new one?";
-
-export const ORG_CREATE_NAME_QUESTION = "Name for the new organization?";
-
-export const ORG_CREATE_DATA_PLANE_QUESTION = "Choose a data plane region:";
-
-export const PROJECT_CREATE_NAME_QUESTION = "Name for the new project?";
-
-export const ORG_SELECT_QUESTION = "Which organization?";
-
-export const PROJECT_SELECT_QUESTION = "Which project?";
 
 export const PROVIDER_QUESTION = "Which LLM provider are you using?";
 
@@ -64,29 +51,13 @@ export function gitignoreNote(args: {
   return ".gitignore unchanged.";
 }
 
-export function deviceCodePrompt(args: {
-  readonly userCode: string;
-  readonly verificationUri: string;
-  readonly verificationUriComplete: string | undefined;
-}): string {
-  const lines = [
-    "Open this URL in your browser to log in:",
-    `  ${args.verificationUriComplete ?? args.verificationUri}`,
-  ];
-  if (
-    args.verificationUriComplete &&
-    args.verificationUriComplete !== args.verificationUri
-  ) {
-    lines.push("");
-    lines.push(
-      `If the link above doesn't pre-fill the code, go to ${args.verificationUri} and enter:`,
-    );
-    lines.push(`  ${args.userCode}`);
-  } else {
-    lines.push("");
-    lines.push(`Enter this code if prompted: ${args.userCode}`);
-  }
-  return lines.join("\n");
+export function wizardLoginPrompt(args: { readonly loginUrl: string }): string {
+  return [
+    "Open this URL in your browser to finish signing in:",
+    `  ${args.loginUrl}`,
+    "",
+    "Pick the org and project you want to use; the wizard will resume here.",
+  ].join("\n");
 }
 
 export function promptSavedNote(path: string): string {
