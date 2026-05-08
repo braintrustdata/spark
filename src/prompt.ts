@@ -3,7 +3,7 @@ import type { DetectedLanguage } from "./language-detect";
 /**
  * The bt-wizard agent prompt. Adapted from
  * /workspace/bt-main/skills/sdk-install/instrument-task.md, with the three
- * sections that bt-wizard handles deterministically removed (per specs.md):
+ * Three sections handled deterministically by the wizard are omitted:
  *   - "Verify API Key (Install Precondition)"
  *   - "Verify in Braintrust (CRITICAL)"
  *   - "Post-Success Verification and Next Steps"

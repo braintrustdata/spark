@@ -5,9 +5,10 @@ import { openBrowser } from "./browser";
 import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
 import { fuzzySelect } from "./fuzzy";
 import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
-import { detectLanguages } from "./language-detect";
+import { detectLanguages, type DetectedLanguage } from "./language-detect";
 import {
   allocateResultFile,
+  buildHarnessCommand,
   ensureBtOnPath,
   runHarness,
   writePromptToTemp,
@@ -143,8 +144,10 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   }
 
   const canInstrument = !provider.custom && providerKey !== undefined;
+  const languages = detectLanguages(deps.cwd);
 
   let tracePermalink: string | undefined;
+  let resumeCommand: string | undefined;
   if (canInstrument) {
     const runIt = unwrap(
       prompts,
@@ -154,29 +157,26 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
       }),
     );
     if (runIt) {
-      tracePermalink = await runInstrumentation(deps, {
+      const result = await runInstrumentation(deps, {
         org: session.orgInfo.name,
         project: session.project.name,
         apiKey: session.apiKey,
         providerEnvVar: provider.envVar,
         providerApiKey: providerKey,
+        languages,
       });
+      tracePermalink = result.tracePermalink;
+      resumeCommand = result.resumeCommand;
     } else {
-      const path = writePromptToTemp(
-        renderPrompt({
-          languages: detectLanguages(deps.cwd),
-          interactive: false,
-        }),
-      ).path;
+      const { path } = writePromptToTemp(
+        renderPrompt({ languages, interactive: false }),
+      );
       prompts.note(promptSavedNote(path), "Prompt saved");
     }
   } else {
-    const path = writePromptToTemp(
-      renderPrompt({
-        languages: detectLanguages(deps.cwd),
-        interactive: false,
-      }),
-    ).path;
+    const { path } = writePromptToTemp(
+      renderPrompt({ languages, interactive: false }),
+    );
     prompts.note(promptSavedNote(path), "Prompt saved");
   }
 
@@ -184,6 +184,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     buildCleanupMessage({
       docsUrl: DOCS_URL,
       tracePermalink,
+      resumeCommand,
     }),
   );
 
@@ -206,6 +207,11 @@ async function selectProvider(deps: WizardDeps): Promise<LlmProvider> {
   return value;
 }
 
+type InstrumentationResult = {
+  readonly tracePermalink: string | undefined;
+  readonly resumeCommand: string | undefined;
+};
+
 async function runInstrumentation(
   deps: WizardDeps,
   args: {
@@ -214,8 +220,9 @@ async function runInstrumentation(
     readonly apiKey: string;
     readonly providerEnvVar?: string;
     readonly providerApiKey?: string;
+    readonly languages: readonly DetectedLanguage[];
   },
-): Promise<string | undefined> {
+): Promise<InstrumentationResult> {
   const { prompts } = deps;
   const installResult = await ensureBtOnPath();
   switch (installResult.status) {
@@ -234,7 +241,7 @@ async function runInstrumentation(
 
   const resultFilePath = allocateResultFile();
   const promptText = renderPrompt({
-    languages: detectLanguages(deps.cwd),
+    languages: args.languages,
     interactive: true,
     resultFilePath,
   });
@@ -245,19 +252,23 @@ async function runInstrumentation(
     resultFilePath,
     providerEnvVar: args.providerEnvVar,
     providerApiKey: args.providerApiKey,
+    languages: args.languages,
   });
 
   if (harnessResult.status === "harness-not-found") {
-    const path = writePromptToTemp(promptText).path;
+    const { path } = writePromptToTemp(promptText);
     prompts.log.warn(
       `Harness not found. Wrote prompt to ${path}; run a coding agent against it manually.`,
     );
-    return undefined;
+    return { tracePermalink: undefined, resumeCommand: undefined };
   }
   if (harnessResult.exitCode !== 0) {
     prompts.log.warn(`Harness exited with code ${harnessResult.exitCode}.`);
   }
-  return harnessResult.tracePermalink;
+  return {
+    tracePermalink: harnessResult.tracePermalink,
+    resumeCommand: buildHarnessCommand(harnessResult.promptFilePath),
+  };
 }
 
 export type DefaultDepsArgs = {

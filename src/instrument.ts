@@ -4,6 +4,8 @@ import { createRequire } from "node:module";
 import { tmpdir, platform } from "node:os";
 import { join } from "node:path";
 
+import type { DetectedLanguage } from "./language-detect";
+
 const HARNESS_PACKAGE_BIN =
   "@braintrust/bt-wizard-harness/bin/bt-wizard-harness.mjs";
 
@@ -19,6 +21,19 @@ function resolveHarnessPath():
       reason: err instanceof Error ? err.message : String(err),
     };
   }
+}
+
+/**
+ * Build the shell command a user can copy-paste to re-run the harness against
+ * a saved prompt file. Returns undefined if the harness binary cannot be
+ * resolved.
+ */
+export function buildHarnessCommand(promptFilePath: string): string | undefined {
+  const resolved = resolveHarnessPath();
+  if (!resolved.ok) {
+    return undefined;
+  }
+  return `node ${JSON.stringify(resolved.path)} --prompt-file ${JSON.stringify(promptFilePath)}`;
 }
 
 export type InstallBtResult =
@@ -61,7 +76,7 @@ function commandExists(cmd: string): Promise<boolean> {
 
 function runShellPipeInstall(): Promise<InstallBtResult> {
   return new Promise((resolve) => {
-    const child = spawn("sh", ["-c", `curl -fsSL ${BT_INSTALL_URL} | sh`], {
+    const child = spawn("sh", ["-c", `curl -fsSL ${BT_INSTALL_URL} | bash`], {
       stdio: "inherit",
     });
     child.on("error", (err) =>
@@ -96,6 +111,7 @@ export type RunHarnessResult =
       readonly status: "completed";
       readonly exitCode: number;
       readonly tracePermalink: string | undefined;
+      readonly promptFilePath: string;
     }
   | {
       readonly status: "harness-not-found";
@@ -129,6 +145,7 @@ export async function runHarness(args: {
   readonly resultFilePath: string;
   readonly providerEnvVar?: string;
   readonly providerApiKey?: string;
+  readonly languages?: readonly DetectedLanguage[];
 }): Promise<RunHarnessResult> {
   const resolved = resolveHarnessPath();
   if (!resolved.ok) {
@@ -145,6 +162,7 @@ export async function runHarness(args: {
         ...process.env,
         BRAINTRUST_API_KEY: args.braintrustApiKey,
         BT_WIZARD_RESULT_FILE: args.resultFilePath,
+        BT_WIZARD_LANGUAGES: (args.languages ?? []).join(","),
         ...(args.providerEnvVar && args.providerApiKey
           ? { [args.providerEnvVar]: args.providerApiKey }
           : {}),
@@ -156,6 +174,7 @@ export async function runHarness(args: {
         status: "completed",
         exitCode: 1,
         tracePermalink: readResultFile(args.resultFilePath),
+        promptFilePath,
       }),
     );
     child.on("close", (code) =>
@@ -163,6 +182,7 @@ export async function runHarness(args: {
         status: "completed",
         exitCode: code ?? 0,
         tracePermalink: readResultFile(args.resultFilePath),
+        promptFilePath,
       }),
     );
   });

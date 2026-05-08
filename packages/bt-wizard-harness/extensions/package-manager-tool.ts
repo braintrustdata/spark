@@ -34,7 +34,7 @@
  *   test:         dotnet
  *
  * Java
- *   pkg managers: bazel, gradle, mvn, mill, sbt
+ *   pkg managers: bazel, gradle, ivy, mvn, mill, sbt
  *   formatters:   checkstyle, google-java-format, spotless
  *   linters:      checkstyle, pmd, spotbugs
  *   test:         gradle, mvn, sbt
@@ -43,7 +43,7 @@
  *   pkg managers: asdf, bundle, gem, rbenv, rvm
  *   formatters:   rubocop, rufo, standardrb
  *   linters:      brakeman, reek, rubocop, standardrb
- *   test:         cucumber, minitest, rspec
+ *   test:         cucumber, minitest, rspec, test-unit
  */
 
 import { spawn } from "node:child_process";
@@ -96,7 +96,7 @@ const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
   ],
   java: [
     // package managers / build tools
-    "bazel", "gradle", "mvn", "mill", "sbt",
+    "bazel", "gradle", "ivy", "mvn", "mill", "sbt",
     // formatters / linters
     "checkstyle", "google-java-format", "spotless", "pmd", "spotbugs",
   ],
@@ -108,7 +108,7 @@ const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
     // linters
     "brakeman", "reek",
     // test
-    "cucumber", "minitest", "rspec",
+    "cucumber", "minitest", "rspec", "test-unit",
   ],
 };
 
