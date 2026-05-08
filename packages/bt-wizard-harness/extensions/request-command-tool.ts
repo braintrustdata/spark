@@ -4,20 +4,15 @@
  * Lets the agent ask the user to approve a one-off command that is not in the
  * default allowed tool list (git, pkg, bt, curl, read/write/edit/grep/find/ls).
  *
- * When the agent calls this tool, the harness prints the requested command and
- * reason to stdout and reads a single line from stdin. If the user types "y"
- * or "yes" (case-insensitive), the command is executed in the current working
- * directory and the output is returned. Any other answer denies the request.
- *
- * Allows the agent to request user approval for one-off commands outside the
- * default allowed tool list.
+ * Uses ctx.ui.confirm() so it works in both interactive and RPC mode.
+ * In RPC mode the harness handles the extension_ui_request sub-protocol;
+ * the tool does not touch stdin directly.
  */
 
-import { createInterface } from "node:readline";
 import { spawn } from "node:child_process";
 import { Type } from "typebox";
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 
 const REQUEST_PARAMS = Type.Object({
   command: Type.String({
@@ -47,20 +42,6 @@ type RequestParams = {
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_OUTPUT_BYTES = 1_000_000;
-
-function askUser(question: string): Promise<string> {
-  return new Promise((resolve) => {
-    const rl = createInterface({
-      input: process.stdin,
-      output: process.stdout,
-      terminal: true,
-    });
-    rl.question(question, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
 
 function runCommand(
   command: string,
@@ -140,22 +121,16 @@ export default function requestCommandTool(pi: ExtensionAPI) {
       "The user sees the full command and reason before deciding.",
     ],
     parameters: REQUEST_PARAMS,
-    async execute(_toolCallId, params) {
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
       const p = params as RequestParams;
       const fullCommand = [p.command, ...p.args].join(" ");
 
-      const answer = await askUser(
-        [
-          "",
-          "┌─ bt-wizard: command approval requested ──────────────",
-          `│  Command : ${fullCommand}`,
-          `│  Reason  : ${p.reason}`,
-          "│",
-          "│  Allow this command? [y/N]: ",
-        ].join("\n"),
+      const approved = await ctx.ui.confirm(
+        "bt-wizard: command approval requested",
+        `Command: ${fullCommand}\nReason:  ${p.reason}`,
       );
 
-      if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+      if (!approved) {
         return {
           content: [
             {
