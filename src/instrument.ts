@@ -110,6 +110,7 @@ export type RunHarnessResult =
   | {
       readonly status: "completed";
       readonly exitCode: number;
+      readonly signal: NodeJS.Signals | null;
       readonly tracePermalink: string | undefined;
       readonly promptFilePath: string;
     }
@@ -173,14 +174,16 @@ export async function runHarness(args: {
       resolve({
         status: "completed",
         exitCode: 1,
+        signal: null,
         tracePermalink: readResultFile(args.resultFilePath),
         promptFilePath: promptFile,
       }),
     );
-    child.on("close", (code) =>
+    child.on("close", (code, signal) =>
       resolve({
         status: "completed",
-        exitCode: code ?? 0,
+        exitCode: code ?? 1,
+        signal,
         tracePermalink: readResultFile(args.resultFilePath),
         promptFilePath: promptFile,
       }),

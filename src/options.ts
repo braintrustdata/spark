@@ -19,6 +19,9 @@ Options:
   --app-url <URL>            Override app URL [env: BRAINTRUST_APP_URL]
   --ca-cert <PATH>           Path to PEM CA bundle [env: BRAINTRUST_CA_CERT; overrides SSL_CERT_FILE]
   -h, --help                 Show help
+
+Environment:
+  CRANK_ENABLE_TELEMETRY=false   Disable anonymous usage telemetry
 `;
 
 export function helpText(): string {

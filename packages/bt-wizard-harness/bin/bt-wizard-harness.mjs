@@ -180,7 +180,7 @@ piProc.onData((data) => {
 
 piProc.onExit(() => {
   process.stdin.setRawMode?.(false);
-  process.exit(0);
+  process.exit(summaryDetected ? 0 : 130);
 });
 
 // ---------------------------------------------------------------------------

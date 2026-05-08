@@ -8,6 +8,7 @@ import {
   WizardCancelledError,
 } from "./clack-wizard";
 import { helpText, parseArgs } from "./options";
+import { startTelemetry, finishTelemetry, markTelemetrySigint } from "./telemetry";
 
 const parsed = parseArgs(process.argv.slice(2), process.env);
 
@@ -37,6 +38,8 @@ if (
   process.exit(result.status ?? 1);
 }
 
+startTelemetry(process.env);
+
 const deps = buildDefaultDeps({
   options: parsed.options,
   prompts: prompts as unknown as Parameters<
@@ -46,10 +49,14 @@ const deps = buildDefaultDeps({
 
 try {
   await runClackWizard(deps);
+  finishTelemetry();
 } catch (error) {
   if (error instanceof WizardCancelledError) {
+    markTelemetrySigint();
+    finishTelemetry();
     process.exit(0);
   }
+  finishTelemetry();
   process.stderr.write(`${(error as Error).message}\n`);
   process.exit(1);
 }
