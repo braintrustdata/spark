@@ -174,7 +174,7 @@ export async function runHarness(args: {
         status: "completed",
         exitCode: 1,
         tracePermalink: readResultFile(args.resultFilePath),
-        promptFilePath,
+        promptFilePath: promptFile,
       }),
     );
     child.on("close", (code) =>
@@ -182,7 +182,7 @@ export async function runHarness(args: {
         status: "completed",
         exitCode: code ?? 0,
         tracePermalink: readResultFile(args.resultFilePath),
-        promptFilePath,
+        promptFilePath: promptFile,
       }),
     );
   });

@@ -62,10 +62,8 @@ if (!existsSync(promptFile)) {
 
 const promptText = readFileSync(promptFile, "utf8");
 
-// ---------------------------------------------------------------------------
-// Resolve pi binary
-// ---------------------------------------------------------------------------
-
+// Resolve the `pi` binary from the workspace's node_modules, falling back to
+// `pi` on PATH if not found (e.g. when installed globally).
 const candidates = [
   resolve(pkgDir, "..", "..", "node_modules", ".bin", "pi"),
   resolve(pkgDir, "node_modules", ".bin", "pi"),
@@ -78,17 +76,13 @@ for (const c of candidates) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Build pi args (RPC mode, same tool set as before)
-// ---------------------------------------------------------------------------
-
 const piArgs = [
   "--mode",
   "rpc",
   "--no-session",
   "--no-builtin-tools",
   "-t",
-  "read,write,edit,grep,find,ls",
+  "read,write,edit,grep,find,ls,bt,pkg,curl,git,request_command",
   "-e",
   resolve(pkgDir, "extensions/path-guard.ts"),
   "-e",
@@ -104,12 +98,7 @@ const piArgs = [
   "--append-system-prompt",
   promptText,
   ...passthrough,
-  // Note: initial user message is sent via RPC prompt command, not as a CLI arg
 ];
-
-// ---------------------------------------------------------------------------
-// Spawn pi
-// ---------------------------------------------------------------------------
 
 const piProc = spawn(piBin, piArgs, {
   stdio: ["pipe", "pipe", "inherit"],
@@ -129,6 +118,15 @@ function send(obj) {
   piProc.stdin.write(JSON.stringify(obj) + "\n");
 }
 
+function respond(event, payload) {
+  send({ type: "extension_ui_response", id: event.id, ...payload });
+}
+
+// Strip a trailing \r so both LF and CRLF line endings are handled.
+function trimCr(s) {
+  return s.endsWith("\r") ? s.slice(0, -1) : s;
+}
+
 // JSONL reader: split only on \n (per RPC spec — do NOT use readline which
 // also splits on Unicode line separators U+2028/U+2029).
 function attachJsonlReader(stream, onLine) {
@@ -138,22 +136,19 @@ function attachJsonlReader(stream, onLine) {
     buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
     let idx;
     while ((idx = buffer.indexOf("\n")) !== -1) {
-      let line = buffer.slice(0, idx);
+      const line = trimCr(buffer.slice(0, idx));
       buffer = buffer.slice(idx + 1);
-      if (line.endsWith("\r")) line = line.slice(0, -1);
       if (line.length > 0) onLine(line);
     }
   });
   stream.on("end", () => {
-    const rest = buffer + decoder.end();
-    if (rest.length > 0) {
-      onLine(rest.endsWith("\r") ? rest.slice(0, -1) : rest);
-    }
+    const rest = trimCr(buffer + decoder.end());
+    if (rest.length > 0) onLine(rest);
   });
 }
 
 // ---------------------------------------------------------------------------
-// Async event queue — lets us process pi events sequentially in a while loop
+// Async event queue — process pi RPC events sequentially in a while loop
 // ---------------------------------------------------------------------------
 
 const eventQueue = [];
@@ -176,22 +171,20 @@ async function nextEvent() {
   return eventQueue.shift();
 }
 
-// Feed pi stdout into the queue
 attachJsonlReader(piProc.stdout, (line) => {
   try {
     enqueue(JSON.parse(line));
   } catch {
-    // ignore non-JSON lines (e.g. pi startup messages)
+    // pi may emit non-JSON startup lines before RPC mode is active
   }
 });
 
-// Sentinel event when the process exits
 piProc.on("close", (code) => {
   enqueue({ type: "_exit", code: code ?? 0 });
 });
 
 // ---------------------------------------------------------------------------
-// Stdin helper — read one line from the real terminal
+// Terminal I/O
 // ---------------------------------------------------------------------------
 
 function readLineFromTerminal(prompt) {
@@ -204,24 +197,17 @@ function readLineFromTerminal(prompt) {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Extension UI request handler
-// ---------------------------------------------------------------------------
-
 async function handleUiRequest(event) {
   switch (event.method) {
     case "notify":
-      // Fire-and-forget — display only, no response expected
       process.stdout.write(`\n[${event.notifyType ?? "info"}] ${event.message}\n`);
-      return;
+      return; // fire-and-forget, no response
 
     case "confirm": {
-      process.stdout.write(
-        `\n${event.title}\n${event.message ?? ""}\n`,
-      );
+      process.stdout.write(`\n${event.title}\n${event.message ?? ""}\n`);
       const answer = await readLineFromTerminal("Allow? [y/N]: ");
       const confirmed = ["y", "yes"].includes(answer.trim().toLowerCase());
-      send({ type: "extension_ui_response", id: event.id, confirmed });
+      respond(event, { confirmed });
       return;
     }
 
@@ -232,28 +218,23 @@ async function handleUiRequest(event) {
       });
       const answer = await readLineFromTerminal("Choice (number): ");
       const idx = parseInt(answer.trim(), 10) - 1;
-      const value =
-        idx >= 0 && idx < (event.options ?? []).length
-          ? event.options[idx]
-          : event.options?.[0];
-      send({ type: "extension_ui_response", id: event.id, value });
+      respond(event, { value: event.options?.[idx] ?? event.options?.[0] });
       return;
     }
 
     case "input": {
       const answer = await readLineFromTerminal(`${event.title}: `);
-      send({ type: "extension_ui_response", id: event.id, value: answer });
+      respond(event, { value: answer });
       return;
     }
 
     default:
-      // Unknown dialog method — cancel it so the agent isn't stuck
-      send({ type: "extension_ui_response", id: event.id, cancelled: true });
+      respond(event, { cancelled: true });
   }
 }
 
 // ---------------------------------------------------------------------------
-// Extract plain text from an AssistantMessage (excluding thinking blocks)
+// Main loop
 // ---------------------------------------------------------------------------
 
 function extractAssistantText(message) {
@@ -267,21 +248,19 @@ function extractAssistantText(message) {
     .join("");
 }
 
-// ---------------------------------------------------------------------------
-// Main loop
-// ---------------------------------------------------------------------------
+function hasSummary(text) {
+  return text.toLowerCase().includes("summary");
+}
 
 let summaryDetected = false;
 
 async function run() {
-  // Send the initial user message that kicks off the agent
   send({ type: "prompt", message: "Begin the Braintrust SDK installation task." });
 
   while (true) {
     const event = await nextEvent();
 
     switch (event.type) {
-      // ── Streaming assistant text ──────────────────────────────────────────
       case "message_update": {
         const ae = event.assistantMessageEvent;
         if (!ae) break;
@@ -297,40 +276,32 @@ async function run() {
         break;
       }
 
-      // ── End of an assistant message: check for "Summary" ──────────────────
       case "message_end": {
         const msg = event.message;
         if (msg?.role === "assistant") {
-          const text = extractAssistantText(msg);
-          if (text.toLowerCase().includes("summary")) {
-            summaryDetected = true;
-          }
+          if (hasSummary(extractAssistantText(msg))) summaryDetected = true;
         }
         break;
       }
 
-      // ── Tool execution display ────────────────────────────────────────────
       case "tool_execution_start":
         process.stdout.write(`\n[▶ ${event.toolName}]\n`);
         break;
 
-      // ── Agent finished a run ──────────────────────────────────────────────
       case "agent_end": {
-        // Also check agent_end messages as a fallback (message_end may not
-        // fire for every message in some pi versions)
-        for (const msg of event.messages ?? []) {
-          if (msg.role === "assistant") {
-            const text = extractAssistantText(msg);
-            if (text.toLowerCase().includes("summary")) summaryDetected = true;
+        // Fallback check: message_end may not fire for every message in some
+        // pi versions, so scan agent_end.messages if summary not yet detected.
+        if (!summaryDetected) {
+          for (const msg of event.messages ?? []) {
+            if (msg.role === "assistant" && hasSummary(extractAssistantText(msg))) {
+              summaryDetected = true;
+              break;
+            }
           }
         }
 
-        if (summaryDetected) {
-          // Agent printed a Summary — wizard moves on to Cleanup
-          return;
-        }
+        if (summaryDetected) return;
 
-        // Not done yet — wait for the user's next message
         const userInput = await readLineFromTerminal("\n> ");
         if (userInput.trim()) {
           send({ type: "prompt", message: userInput });
@@ -338,19 +309,16 @@ async function run() {
         break;
       }
 
-      // ── Extension UI (e.g. request-command-tool confirmation) ────────────
       case "extension_ui_request":
         await handleUiRequest(event);
         break;
 
-      // ── Pi process exited ─────────────────────────────────────────────────
       case "_exit":
         return;
     }
   }
 }
 
-// Ctrl+C → abort current agent operation gracefully
 process.on("SIGINT", () => {
   send({ type: "abort" });
   setTimeout(() => {
