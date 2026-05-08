@@ -6,11 +6,11 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "braintrust-wizard": "./dist/cli.js"
+    "braintrust-wizard": "./dist/cli.mjs"
   },
   "packageManager": "pnpm@10.33.3",
   "scripts": {
-    "start": "pnpm build && node dist/cli.js",
+    "start": "pnpm build && node dist/cli.mjs",
     "build": "rolldown -c",
     "start:beau": "pnpm build:beau && node dist/cli.beau.js",
     "build:beau": "rolldown -c rolldown.beau.config.mjs",

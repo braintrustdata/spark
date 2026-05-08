@@ -4,10 +4,10 @@
  *
  * Usage: bt-wizard-harness --prompt-file <path> [extra pi args...]
  *
- * Runs pi in RPC mode (--mode rpc) so we can:
- *   - Stream assistant text transparently to stdout (text mode feel)
- *   - Detect "Summary" in the agent's text output and exit to Cleanup
- *   - Handle extension_ui_request from request-command-tool via the terminal
+ * Runs pi inside a PTY so it gets a real terminal: correct window size,
+ * ANSI colours, cursor control, and automatic resize on SIGWINCH.
+ * We intercept the PTY output to scan for "summary" (case-insensitive);
+ * when detected we kill pi and exit so the wizard can run its cleanup phase.
  *
  * Tools loaded (--no-builtin-tools baseline):
  *   read,write,edit,grep,find,ls  built-in file ops
@@ -19,12 +19,10 @@
  *   request-command-tool          user-approved one-off commands
  */
 
-import { spawn } from "node:child_process";
-import { createInterface } from "node:readline";
 import { existsSync, readFileSync } from "node:fs";
-import { StringDecoder } from "node:string_decoder";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import pty from "node-pty";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const pkgDir = resolve(__dirname, "..");
@@ -62,23 +60,38 @@ if (!existsSync(promptFile)) {
 
 const promptText = readFileSync(promptFile, "utf8");
 
-// Resolve the `pi` binary from the workspace's node_modules, falling back to
-// `pi` on PATH if not found (e.g. when installed globally).
-const candidates = [
-  resolve(pkgDir, "..", "..", "node_modules", ".bin", "pi"),
-  resolve(pkgDir, "node_modules", ".bin", "pi"),
-];
-let piBin = "pi";
-for (const c of candidates) {
-  if (existsSync(c)) {
-    piBin = c;
-    break;
+// Resolve pi's actual JS entry point so node-pty can spawn `node <path>`
+// directly. The .bin/pi shim is a POSIX shell script that node-pty cannot
+// exec via posix_spawnp, so we must bypass it.
+function resolvePiJs() {
+  const shimCandidates = [
+    resolve(pkgDir, "node_modules", ".bin", "pi"),
+    resolve(pkgDir, "..", "..", "node_modules", ".bin", "pi"),
+  ];
+  for (const shim of shimCandidates) {
+    if (!existsSync(shim)) continue;
+    // The shim contains: exec node "$basedir/../../../../path/to/cli.js" "$@"
+    // $basedir is the directory containing the shim file.
+    const shimDir = dirname(shim);
+    const content = readFileSync(shim, "utf8");
+    const m = content.match(/exec\s+\S*node\S*\s+"([^"]+\.js)"/);
+    if (!m) continue;
+    // Replace the literal "$basedir" token with the shim's directory.
+    const jsPath = resolve(m[1].replace("$basedir", shimDir));
+    if (existsSync(jsPath)) return jsPath;
   }
+  return null;
 }
 
+const piJs = resolvePiJs();
+// spawn args: if we found the JS file, use `node <file>`; else fall back to
+// spawning the `pi` executable directly (works if installed globally as a
+// real binary rather than a pnpm shim).
+const [spawnBin, spawnArgs] = piJs
+  ? [process.execPath, [piJs]]
+  : ["pi", []];
+
 const piArgs = [
-  "--mode",
-  "rpc",
   "--no-session",
   "--no-builtin-tools",
   "-t",
@@ -100,241 +113,97 @@ const piArgs = [
   ...passthrough,
 ];
 
-const piProc = spawn(piBin, piArgs, {
-  stdio: ["pipe", "pipe", "inherit"],
+// ---------------------------------------------------------------------------
+// PTY spawn — pi sees a real terminal on all three fds
+// ---------------------------------------------------------------------------
+
+const cols = process.stdout.columns ?? 80;
+const rows = process.stdout.rows ?? 24;
+
+const piProc = pty.spawn(spawnBin, [...spawnArgs, ...piArgs], {
+  name: process.env.TERM ?? "xterm-256color",
+  cols,
+  rows,
   cwd: process.cwd(),
-});
-
-piProc.on("error", (err) => {
-  process.stderr.write(`failed to spawn ${piBin}: ${err.message}\n`);
-  process.exit(127);
+  env: process.env,
 });
 
 // ---------------------------------------------------------------------------
-// RPC helpers
+// Summary detection
 // ---------------------------------------------------------------------------
 
-function send(obj) {
-  piProc.stdin.write(JSON.stringify(obj) + "\n");
-}
+// Scan a sliding window so "summary" split across chunks is still caught.
+const SUMMARY_WORD = "summary";
+const WINDOW = SUMMARY_WORD.length - 1;
 
-function respond(event, payload) {
-  send({ type: "extension_ui_response", id: event.id, ...payload });
-}
-
-// Strip a trailing \r so both LF and CRLF line endings are handled.
-function trimCr(s) {
-  return s.endsWith("\r") ? s.slice(0, -1) : s;
-}
-
-// JSONL reader: split only on \n (per RPC spec — do NOT use readline which
-// also splits on Unicode line separators U+2028/U+2029).
-function attachJsonlReader(stream, onLine) {
-  const decoder = new StringDecoder("utf8");
-  let buffer = "";
-  stream.on("data", (chunk) => {
-    buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
-    let idx;
-    while ((idx = buffer.indexOf("\n")) !== -1) {
-      const line = trimCr(buffer.slice(0, idx));
-      buffer = buffer.slice(idx + 1);
-      if (line.length > 0) onLine(line);
-    }
-  });
-  stream.on("end", () => {
-    const rest = trimCr(buffer + decoder.end());
-    if (rest.length > 0) onLine(rest);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// Async event queue — process pi RPC events sequentially in a while loop
-// ---------------------------------------------------------------------------
-
-const eventQueue = [];
-let drainResolve = null;
-
-function enqueue(event) {
-  eventQueue.push(event);
-  if (drainResolve) {
-    const resolve = drainResolve;
-    drainResolve = null;
-    resolve();
-  }
-}
-
-async function nextEvent() {
-  if (eventQueue.length > 0) return eventQueue.shift();
-  await new Promise((resolve) => {
-    drainResolve = resolve;
-  });
-  return eventQueue.shift();
-}
-
-attachJsonlReader(piProc.stdout, (line) => {
-  try {
-    enqueue(JSON.parse(line));
-  } catch {
-    // pi may emit non-JSON startup lines before RPC mode is active
-  }
-});
-
-piProc.on("close", (code) => {
-  enqueue({ type: "_exit", code: code ?? 0 });
-});
-
-// ---------------------------------------------------------------------------
-// Terminal I/O
-// ---------------------------------------------------------------------------
-
-function readLineFromTerminal(prompt) {
-  return new Promise((resolve) => {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    rl.question(prompt, (answer) => {
-      rl.close();
-      resolve(answer);
-    });
-  });
-}
-
-async function handleUiRequest(event) {
-  switch (event.method) {
-    case "notify":
-      process.stdout.write(`\n[${event.notifyType ?? "info"}] ${event.message}\n`);
-      return; // fire-and-forget, no response
-
-    case "confirm": {
-      process.stdout.write(`\n${event.title}\n${event.message ?? ""}\n`);
-      const answer = await readLineFromTerminal("Allow? [y/N]: ");
-      const confirmed = ["y", "yes"].includes(answer.trim().toLowerCase());
-      respond(event, { confirmed });
-      return;
-    }
-
-    case "select": {
-      process.stdout.write(`\n${event.title}\n`);
-      (event.options ?? []).forEach((opt, i) => {
-        process.stdout.write(`  ${i + 1}) ${opt}\n`);
-      });
-      const answer = await readLineFromTerminal("Choice (number): ");
-      const idx = parseInt(answer.trim(), 10) - 1;
-      respond(event, { value: event.options?.[idx] ?? event.options?.[0] });
-      return;
-    }
-
-    case "input": {
-      const answer = await readLineFromTerminal(`${event.title}: `);
-      respond(event, { value: answer });
-      return;
-    }
-
-    default:
-      respond(event, { cancelled: true });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Main loop
-// ---------------------------------------------------------------------------
-
-function extractAssistantText(message) {
-  if (!message?.content) return "";
-  const parts = Array.isArray(message.content)
-    ? message.content
-    : [{ type: "text", text: String(message.content) }];
-  return parts
-    .filter((c) => c.type === "text")
-    .map((c) => c.text ?? "")
-    .join("");
-}
-
-function hasSummary(text) {
-  return text.toLowerCase().includes("summary");
-}
-
+let tail = "";
 let summaryDetected = false;
+// While the user is typing, pause scanning so echoed keystrokes don't trigger
+// shutdown. The timer is reset on every keystroke and expires 150 ms after the
+// last one — well before any agent response could arrive.
+let userTypingTimer = null;
 
-async function run() {
-  send({ type: "prompt", message: "Begin the Braintrust SDK installation task." });
-
-  while (true) {
-    const event = await nextEvent();
-
-    switch (event.type) {
-      case "message_update": {
-        const ae = event.assistantMessageEvent;
-        if (!ae) break;
-        if (ae.type === "thinking_start") {
-          process.stdout.write("\n[thinking] ");
-        } else if (ae.type === "thinking_delta") {
-          process.stdout.write(ae.delta);
-        } else if (ae.type === "thinking_end") {
-          process.stdout.write("\n");
-        } else if (ae.type === "text_delta") {
-          process.stdout.write(ae.delta);
-        }
-        break;
-      }
-
-      case "message_end": {
-        const msg = event.message;
-        if (msg?.role === "assistant") {
-          if (hasSummary(extractAssistantText(msg))) summaryDetected = true;
-        }
-        break;
-      }
-
-      case "tool_execution_start":
-        process.stdout.write(`\n[▶ ${event.toolName}]\n`);
-        break;
-
-      case "agent_end": {
-        // Fallback check: message_end may not fire for every message in some
-        // pi versions, so scan agent_end.messages if summary not yet detected.
-        if (!summaryDetected) {
-          for (const msg of event.messages ?? []) {
-            if (msg.role === "assistant" && hasSummary(extractAssistantText(msg))) {
-              summaryDetected = true;
-              break;
-            }
-          }
-        }
-
-        if (summaryDetected) return;
-
-        const userInput = await readLineFromTerminal("\n> ");
-        if (userInput.trim()) {
-          send({ type: "prompt", message: userInput });
-        }
-        break;
-      }
-
-      case "extension_ui_request":
-        await handleUiRequest(event);
-        break;
-
-      case "_exit":
-        return;
+function shutdown() {
+  if (summaryDetected) return;
+  summaryDetected = true;
+  setTimeout(() => {
+    try {
+      piProc.kill("SIGTERM");
+    } catch {
+      // already gone
     }
-  }
+  }, 200).unref();
 }
+
+piProc.onData((data) => {
+  process.stdout.write(data);
+
+  if (summaryDetected || userTypingTimer) return;
+
+  const text = tail + data;
+  if (text.toLowerCase().includes(SUMMARY_WORD)) {
+    shutdown();
+  } else {
+    tail = text.length > WINDOW ? text.slice(-WINDOW) : text;
+  }
+});
+
+piProc.onExit(() => {
+  process.stdin.setRawMode?.(false);
+  process.exit(0);
+});
+
+// ---------------------------------------------------------------------------
+// Forward stdin and resize events
+// ---------------------------------------------------------------------------
+
+if (process.stdin.isTTY) {
+  process.stdin.setRawMode(true);
+}
+process.stdin.resume();
+process.stdin.on("data", (data) => {
+  clearTimeout(userTypingTimer);
+  userTypingTimer = setTimeout(() => {
+    userTypingTimer = null;
+    tail = ""; // discard any echoed chars that landed in the window
+  }, 150);
+  piProc.write(typeof data === "string" ? data : data.toString("binary"));
+});
+
+process.on("SIGWINCH", () => {
+  piProc.resize(process.stdout.columns ?? 80, process.stdout.rows ?? 24);
+});
+
+// ---------------------------------------------------------------------------
+// Signal forwarding
+// ---------------------------------------------------------------------------
 
 process.on("SIGINT", () => {
-  send({ type: "abort" });
-  setTimeout(() => {
-    piProc.kill("SIGTERM");
-    process.exit(0);
-  }, 1000).unref();
+  // In raw mode, Ctrl-C is forwarded as a data byte (\x03) via stdin.on("data")
+  // above, so we only need this as a fallback for non-TTY contexts.
+  try {
+    piProc.kill("SIGINT");
+  } catch {
+    // already gone
+  }
 });
-
-run()
-  .catch((err) => {
-    process.stderr.write(`harness error: ${err.message}\n`);
-  })
-  .finally(() => {
-    try {
-      piProc.stdin.end();
-    } catch {
-      // already closed
-    }
-  });
