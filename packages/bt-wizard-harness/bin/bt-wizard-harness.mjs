@@ -138,31 +138,41 @@ const WINDOW = SUMMARY_WORD.length - 1;
 
 let tail = "";
 let summaryDetected = false;
+let shutdownTimer = null;
 // While the user is typing, pause scanning so echoed keystrokes don't trigger
 // shutdown. The timer is reset on every keystroke and expires 150 ms after the
 // last one — well before any agent response could arrive.
 let userTypingTimer = null;
 
-function shutdown() {
-  if (summaryDetected) return;
-  summaryDetected = true;
-  setTimeout(() => {
+function scheduleShutdown() {
+  // (Re-)arm a timer: kill pi after 1 s of PTY silence, i.e. when the agent
+  // has finished outputting and is waiting for the user to type.
+  clearTimeout(shutdownTimer);
+  shutdownTimer = setTimeout(() => {
     try {
       piProc.kill("SIGTERM");
     } catch {
       // already gone
     }
-  }, 200).unref();
+  }, 1000);
 }
 
 piProc.onData((data) => {
   process.stdout.write(data);
 
-  if (summaryDetected || userTypingTimer) return;
+  if (userTypingTimer) return;
+
+  if (summaryDetected) {
+    // Agent is still outputting after the summary word — keep pushing the
+    // shutdown deadline until output goes quiet.
+    scheduleShutdown();
+    return;
+  }
 
   const text = tail + data;
   if (text.toLowerCase().includes(SUMMARY_WORD)) {
-    shutdown();
+    summaryDetected = true;
+    scheduleShutdown();
   } else {
     tail = text.length > WINDOW ? text.slice(-WINDOW) : text;
   }
