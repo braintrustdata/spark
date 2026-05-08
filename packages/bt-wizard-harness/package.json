@@ -19,7 +19,10 @@
     "extensions": [
       "./extensions/path-guard.ts",
       "./extensions/bt-tool.ts",
-      "./extensions/curl-tool.ts"
+      "./extensions/curl-tool.ts",
+      "./extensions/git-tool.ts",
+      "./extensions/package-manager-tool.ts",
+      "./extensions/request-command-tool.ts"
     ]
   }
 }

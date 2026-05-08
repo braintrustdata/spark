@@ -5,15 +5,18 @@
  * Usage: bt-wizard-harness --prompt-file <path> [extra pi args...]
  *
  * Wraps `pi` (the @mariozechner/pi-coding-agent CLI) with:
- *   --no-builtin-tools                 → start from a clean slate
- *   -t read,write,edit,grep,find,ls,bt,curl
- *   -e <path-guard>                    → enforce path scope
- *   -e <bt-tool>                       → expose `bt` as a tool
- *   -e <curl-tool>                     → GET/HEAD-only HTTP fetcher
- *   --append-system-prompt <prompt>    → bt setup instrumentation prompt
+ *   --no-builtin-tools                     → start from a clean slate
+ *   -t read,write,edit,grep,find,ls
+ *   -e <path-guard>                        → enforce path scope
+ *   -e <bt-tool>                           → expose `bt` as a tool
+ *   -e <curl-tool>                         → GET/HEAD-only HTTP fetcher
+ *   -e <git-tool>                          → safe git subcommands
+ *   -e <package-manager-tool>             → language-gated package managers
+ *   -e <request-command-tool>             → user-approved one-off commands
+ *   --append-system-prompt <prompt>        → bt setup instrumentation prompt
  *
- * No web search / fetch_content / pi-web-access — the harness is read-only
- * over HTTP via the `curl` tool, with stateful work going through `bt`.
+ * No bash/python — stateful work goes through bt, git, or pkg tools.
+ * BT_WIZARD_LANGUAGES controls which package managers are allowed.
  */
 
 import { spawn } from "node:child_process";
@@ -56,13 +59,19 @@ const promptText = readFileSync(promptFile, "utf8");
 const piArgs = [
   "--no-builtin-tools",
   "-t",
-  "read,write,edit,grep,find,ls,bt,curl",
+  "read,write,edit,grep,find,ls",
   "-e",
   resolve(pkgDir, "extensions/path-guard.ts"),
   "-e",
   resolve(pkgDir, "extensions/bt-tool.ts"),
   "-e",
   resolve(pkgDir, "extensions/curl-tool.ts"),
+  "-e",
+  resolve(pkgDir, "extensions/git-tool.ts"),
+  "-e",
+  resolve(pkgDir, "extensions/package-manager-tool.ts"),
+  "-e",
+  resolve(pkgDir, "extensions/request-command-tool.ts"),
   "--append-system-prompt",
   promptText,
   ...passthrough,

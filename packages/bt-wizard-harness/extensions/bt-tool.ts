@@ -1,8 +1,8 @@
 /**
  * `bt` CLI extension.
  *
- * The bt-wizard harness disables `bash`, but the spec still allows the agent
- * to invoke the Braintrust `bt` CLI. We expose `bt` as a first-class tool so
+ * The bt-wizard harness disables `bash`, but the agent still needs to invoke
+ * the Braintrust `bt` CLI. We expose `bt` as a first-class tool so
  * the model can call it with a structured argv and stdin instead of a raw
  * shell line.
  *
