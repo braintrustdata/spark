@@ -125,6 +125,13 @@ export default function requestCommandTool(pi: ExtensionAPI) {
       const p = params as RequestParams;
       const fullCommand = [p.command, ...p.args].join(" ");
 
+      if (p.command === "sudo" || p.args.includes("sudo")) {
+        return {
+          content: [{ type: "text", text: `Command denied: sudo is not allowed.` }],
+          details: { approved: false },
+        };
+      }
+
       const approved = await ctx.ui.confirm(
         "bt-wizard: command approval requested",
         `Command: ${fullCommand}\nReason:  ${p.reason}`,
