@@ -63,6 +63,7 @@ export default function pathGuard(pi: ExtensionAPI) {
   const cwdAbs = resolve(cwd);
   const root = gitRoot(cwdAbs);
   const envBraintrust = root ? resolve(root, ".env.braintrust") : undefined;
+  const envFile = root ? resolve(root, ".env") : undefined;
   const resultFileRaw = process.env["BT_WIZARD_RESULT_FILE"];
   const resultFile =
     resultFileRaw && resultFileRaw.length > 0
@@ -70,6 +71,10 @@ export default function pathGuard(pi: ExtensionAPI) {
       : undefined;
 
   const exceptions = [envBraintrust, resultFile].filter(
+    (p): p is string => typeof p === "string",
+  );
+  // Paths that must never be touched regardless of cwd.
+  const blockedPaths = [envFile].filter(
     (p): p is string => typeof p === "string",
   );
 
@@ -89,6 +94,12 @@ export default function pathGuard(pi: ExtensionAPI) {
     }
     const abs = isAbsolute(raw) ? resolve(raw) : resolve(cwdAbs, raw);
 
+    if (blockedPaths.includes(abs)) {
+      return {
+        block: true,
+        reason: `Accessing "${raw}" is not allowed; use .env.braintrust instead.`,
+      };
+    }
     if (exceptions.includes(abs)) {
       return undefined;
     }

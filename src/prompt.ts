@@ -74,6 +74,10 @@ Summarize:
 - What logs/traces were emitted
 - The Braintrust permalink (required)
 
+When done, output the following sentinel on its own line exactly as written:
+
+INSTRUMENTATION_COMPLETE
+
 {RESULT_FILE_CONTEXT}{WORKFLOW_CONTEXT}
 `;
 

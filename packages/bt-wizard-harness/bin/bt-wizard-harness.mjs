@@ -134,7 +134,7 @@ const piProc = pty.spawn(spawnBin, [...spawnArgs, ...piArgs], {
 // ---------------------------------------------------------------------------
 
 // Scan a sliding window so "summary" split across chunks is still caught.
-const SUMMARY_WORD = "summary";
+const SUMMARY_WORD = "INSTRUMENTATION_COMPLETE";
 const WINDOW = SUMMARY_WORD.length - 1;
 
 let tail = "";
