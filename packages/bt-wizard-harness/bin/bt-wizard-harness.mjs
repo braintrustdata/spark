@@ -110,6 +110,7 @@ const piArgs = [
   resolve(pkgDir, "extensions/request-command-tool.ts"),
   "--append-system-prompt",
   promptText,
+  "Begin the Braintrust SDK instrumentation.",
   ...passthrough,
 ];
 
