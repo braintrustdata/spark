@@ -1,10 +1,19 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
-export function findGitRoot(startDir: string): string | undefined {
+async function pathExists(p: string): Promise<boolean> {
+  return access(p).then(
+    () => true,
+    () => false,
+  );
+}
+
+export async function findGitRoot(
+  startDir: string,
+): Promise<string | undefined> {
   let dir = resolve(startDir);
   while (true) {
-    if (existsSync(join(dir, ".git"))) {
+    if (await pathExists(join(dir, ".git"))) {
       return dir;
     }
     const parent = dirname(dir);
@@ -15,8 +24,8 @@ export function findGitRoot(startDir: string): string | undefined {
   }
 }
 
-export function isGitRepo(cwd: string): boolean {
-  return findGitRoot(cwd) !== undefined;
+export async function isGitRepo(cwd: string): Promise<boolean> {
+  return (await findGitRoot(cwd)) !== undefined;
 }
 
 const ENV_FILENAME = ".env.braintrust";
@@ -28,16 +37,18 @@ export type EnvFileWriteResult = {
   readonly alreadyCovered: boolean;
 };
 
-export function writeEnvBraintrust(
+export async function writeEnvBraintrust(
   gitRoot: string,
   apiKey: string,
-): EnvFileWriteResult {
+): Promise<EnvFileWriteResult> {
   const envFilePath = join(gitRoot, ENV_FILENAME);
-  writeFileSync(envFilePath, `BRAINTRUST_API_KEY=${apiKey}\n`, { mode: 0o600 });
+  await writeFile(envFilePath, `BRAINTRUST_API_KEY=${apiKey}\n`, {
+    mode: 0o600,
+  });
 
   const gitignorePath = join(gitRoot, ".gitignore");
-  const existing = existsSync(gitignorePath)
-    ? readFileSync(gitignorePath, "utf8")
+  const existing = (await pathExists(gitignorePath))
+    ? await readFile(gitignorePath, "utf8")
     : "";
 
   const alreadyCovered = gitignoreCovers(existing, ENV_FILENAME);
@@ -51,7 +62,7 @@ export function writeEnvBraintrust(
   }
 
   const sep = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
-  writeFileSync(gitignorePath, `${existing}${sep}${ENV_FILENAME}\n`);
+  await writeFile(gitignorePath, `${existing}${sep}${ENV_FILENAME}\n`);
   return {
     envFilePath,
     gitignorePath,
