@@ -7,4 +7,3 @@ export async function openBrowser(url: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
