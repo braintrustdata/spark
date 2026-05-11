@@ -1,43 +1,53 @@
+import { mkdtempSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
-  runClackWizard,
-  type ClackWizardPrompts,
-  WizardCancelledError,
-} from "../src/clack-wizard";
+  type WizardSigninAuthClient,
+  type WizardSigninCompleteResult,
+  type WizardSigninEvents,
+} from "../src/auth";
 import {
-  ACCOUNT_QUESTION,
-  LOGIN_BROWSER_PROMPT,
-  WIZARD_CANCEL_MESSAGE,
-  WIZARD_TITLE,
-  loginPlaceholderOutro,
-} from "../src/wizard-copy";
+  type ClackWizardPrompts,
+  runClackWizard,
+  WizardCancelledError,
+  type WizardDeps,
+} from "../src/clack-wizard";
+import { WIZARD_TITLE, WIZARD_CANCEL_MESSAGE } from "../src/wizard-copy";
 
 const CANCEL = Symbol("cancel");
 
-type ConfirmCall = {
-  readonly initialValue?: boolean;
-  readonly message: string;
+type ConfirmAnswer = boolean | typeof CANCEL;
+type SelectAnswer<T> = T | typeof CANCEL;
+type TextAnswer = string | typeof CANCEL;
+
+type FakePromptInputs = {
+  readonly confirms?: ConfirmAnswer[];
+  readonly selects?: ReadonlyArray<unknown>;
+  readonly texts?: TextAnswer[];
+  readonly passwords?: TextAnswer[];
 };
 
-function createPrompts(answers: Array<boolean | typeof CANCEL>) {
-  const confirmCalls: ConfirmCall[] = [];
+function createPrompts(inputs: FakePromptInputs) {
   const events: string[] = [];
+  const confirms = [...(inputs.confirms ?? [])];
+  const selects = [...(inputs.selects ?? [])];
+  const texts = [...(inputs.texts ?? [])];
+  const passwords = [...(inputs.passwords ?? [])];
 
   const prompts: ClackWizardPrompts = {
     cancel(message) {
       events.push(`cancel:${message}`);
     },
     async confirm(options) {
-      confirmCalls.push(options);
-
-      const answer = answers.shift();
-
-      if (answer === undefined) {
-        throw new Error("No fake answer was provided.");
+      const next = confirms.shift();
+      events.push(`confirm:${options.message}`);
+      if (next === undefined) {
+        throw new Error(`No confirm answer for: ${options.message}`);
       }
-
-      return answer;
+      return next;
     },
     intro(message) {
       events.push(`intro:${message}`);
@@ -45,63 +55,135 @@ function createPrompts(answers: Array<boolean | typeof CANCEL>) {
     isCancel(value): value is symbol {
       return value === CANCEL;
     },
+    note(message, title) {
+      events.push(`note:${title ?? ""}`);
+      void message;
+    },
     outro(message) {
-      events.push(`outro:${message}`);
+      events.push(`outro:${message.split("\n")[0]}`);
+    },
+    async password(options) {
+      const next = passwords.shift();
+      events.push(`password:${options.message}`);
+      if (next === undefined) {
+        throw new Error(`No password answer for: ${options.message}`);
+      }
+      return next as string | symbol;
+    },
+    async select(options) {
+      const next = selects.shift();
+      events.push(`select:${options.message}`);
+      if (next === undefined) {
+        throw new Error(`No select answer for: ${options.message}`);
+      }
+      return next as SelectAnswer<unknown> as symbol;
+    },
+    async text(options) {
+      const next = texts.shift();
+      events.push(`text:${options.message}`);
+      if (next === undefined) {
+        throw new Error(`No text answer for: ${options.message}`);
+      }
+      return next as string | symbol;
+    },
+    log: {
+      warn: (m) => events.push(`warn:${m}`),
+      info: (m) => events.push(`info:${m}`),
+      error: (m) => events.push(`error:${m}`),
+      success: (m) => events.push(`success:${m}`),
     },
   };
 
+  return { prompts, events };
+}
+
+const DEFAULT_LOGIN_RESULT: WizardSigninCompleteResult = {
+  apiKey: "bt-secret-key",
+  orgInfo: {
+    id: "o1",
+    name: "acme",
+    api_url: "https://api.test",
+    proxy_url: null,
+    realtime_url: null,
+    is_universal_api: null,
+    git_metadata: null,
+  },
+  project: {
+    id: "p1",
+    name: "demo",
+    org_id: "o1",
+    description: null,
+  },
+};
+
+function buildDeps(args: {
+  readonly prompts: ClackWizardPrompts;
+  readonly authClient?: WizardSigninAuthClient;
+  readonly cwd?: string;
+}): WizardDeps {
+  const cwd = args.cwd ?? mkdtempSync(join(tmpdir(), "bt-wizard-test-"));
+  const stubAuth =
+    args.authClient ??
+    ({
+      login: async (events: WizardSigninEvents) => {
+        events.onLoginUrl({
+          loginUrl: "https://app.test/app/cli-login/test-session",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+        });
+        await events.onTryOpenBrowser(
+          "https://app.test/app/cli-login/test-session",
+        );
+        return DEFAULT_LOGIN_RESULT;
+      },
+    } as unknown as WizardSigninAuthClient);
+
   return {
-    confirmCalls,
-    events,
-    prompts,
+    cwd,
+    env: {},
+    options: {
+      apiUrl: "https://api.test",
+      appUrl: "https://app.test",
+      caCertPath: undefined,
+    },
+    prompts: args.prompts,
+    authClient: stubAuth,
+    fuzzy: async ({ choices }) => choices[0]!.value,
+    openBrowser: async () => true,
   };
 }
 
 describe("runClackWizard", () => {
-  it("asks both questions in order", async () => {
-    const { confirmCalls, events, prompts } = createPrompts([true, true]);
-
-    await expect(runClackWizard(prompts)).resolves.toEqual({
-      hasBraintrustAccount: true,
-      openBrowser: true,
+  it("walks through happy path with no harness run", async () => {
+    const customProvider = { id: "custom", label: "Custom", custom: true };
+    const { prompts, events } = createPrompts({
+      selects: [customProvider],
     });
+    const deps = buildDeps({ prompts });
 
-    expect(events).toEqual([
-      `intro:${WIZARD_TITLE}`,
-      `outro:${loginPlaceholderOutro(true)}`,
-    ]);
-    expect(confirmCalls).toEqual([
-      { initialValue: true, message: ACCOUNT_QUESTION },
-      { initialValue: true, message: LOGIN_BROWSER_PROMPT },
-    ]);
+    const result = await runClackWizard(deps);
+
+    expect(result.orgName).toBe("acme");
+    expect(result.projectName).toBe("demo");
+    expect(result.braintrustApiKey).toBe("bt-secret-key");
+    expect(events[0]).toBe(`intro:${WIZARD_TITLE}`);
+    expect(events).toContain("note:Login");
   });
 
-  it("returns the selected answers and acknowledges the login choice", async () => {
-    const { confirmCalls, events, prompts } = createPrompts([false, false]);
+  it("cancels cleanly when the user aborts the provider select", async () => {
+    const { prompts, events } = createPrompts({ selects: [CANCEL] });
+    const deps = buildDeps({ prompts });
 
-    await expect(runClackWizard(prompts)).resolves.toEqual({
-      hasBraintrustAccount: false,
-      openBrowser: false,
-    });
-
-    expect(confirmCalls).toEqual([
-      { initialValue: true, message: ACCOUNT_QUESTION },
-      { initialValue: true, message: LOGIN_BROWSER_PROMPT },
-    ]);
-    expect(events).toContain(`outro:${loginPlaceholderOutro(false)}`);
+    await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
+    expect(events).toContain(`cancel:${WIZARD_CANCEL_MESSAGE}`);
   });
 
-  it("cancels cleanly before completing the flow", async () => {
-    const { confirmCalls, events, prompts } = createPrompts([CANCEL]);
+  it("warns when not in a git repo", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "bt-wizard-nogit-"));
+    mkdirSync(join(dir, "child"), { recursive: true });
+    const { prompts, events } = createPrompts({ selects: [CANCEL] });
+    const deps = buildDeps({ prompts, cwd: join(dir, "child") });
 
-    await expect(runClackWizard(prompts)).rejects.toThrow(WizardCancelledError);
-
-    expect(confirmCalls).toEqual([
-      { initialValue: true, message: ACCOUNT_QUESTION },
-    ]);
-    expect(events).toEqual([
-      `intro:${WIZARD_TITLE}`,
-      `cancel:${WIZARD_CANCEL_MESSAGE}`,
-    ]);
+    await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
+    expect(events.some((e) => e.startsWith("warn:Heads up"))).toBe(true);
   });
 });
