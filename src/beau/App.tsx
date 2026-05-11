@@ -63,7 +63,6 @@ export function easeLayoutTransitionProgress(progress: number) {
   return 1 - (1 - clampedProgress) ** 3;
 }
 
-
 function Spacer({ height }: { readonly height: number }) {
   if (height <= 0) {
     return null;

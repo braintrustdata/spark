@@ -74,21 +74,16 @@ Summarize:
 - What logs/traces were emitted
 - The Braintrust permalink (required)
 
-When done, output the following sentinel on its own line exactly as written:
+If instrumentation succeeded, output the following sentinel on its own line exactly as written:
 
 INSTRUMENTATION_COMPLETE
 
+If instrumentation failed or could not be completed, output instead:
+
+INSTRUMENTATION_INCOMPLETE
+
 {RESULT_FILE_CONTEXT}{WORKFLOW_CONTEXT}
 `;
-
-const LANGUAGE_DOC_FILES: Record<DetectedLanguage, string> = {
-  python: "python.md",
-  typescript: "typescript.md",
-  go: "go.md",
-  java: "java.md",
-  ruby: "ruby.md",
-  csharp: "csharp.md",
-};
 
 const LANGUAGE_DISPLAY: Record<DetectedLanguage, string> = {
   python: "Python",
@@ -99,7 +94,8 @@ const LANGUAGE_DISPLAY: Record<DetectedLanguage, string> = {
   csharp: "C#",
 };
 
-const SDK_INSTALL_DOCS_BASE = "https://www.braintrust.dev/docs/sdk-install";
+const SDK_INSTALL_DOCS_BASE =
+  "https://www.braintrust.dev/docs/instrument/trace-llm-calls";
 
 const INSTALL_SDK_REQUIREMENTS = `- Install the latest Braintrust SDK via the language's package manager. Do not hard-pin the SDK version unless the user asks. Build-time dependencies called out by the language-specific resource (e.g. Orchestrion for Go) must still be pinned to an exact version.
 - Modify only dependency files, a minimal application entry point (e.g., main/bootstrap), and any existing build/run scripts or checked-in env/config that must change to keep auto-instrumentation active in normal use. Auto-instrument the app (except for Java and C# which don't support auto-instrumentation).
@@ -143,12 +139,10 @@ export function renderPrompt(opts: RenderPromptOptions): string {
 
   if (opts.languages.length === 0) {
     languageContext = DETECT_LANGUAGE_BLOCK;
-    const rows = (
-      Object.entries(LANGUAGE_DOC_FILES) as Array<[DetectedLanguage, string]>
-    )
+    const rows = (Object.keys(LANGUAGE_DISPLAY) as DetectedLanguage[])
       .map(
-        ([lang, file]) =>
-          `| ${LANGUAGE_DISPLAY[lang]} | \`${SDK_INSTALL_DOCS_BASE}/${file}\` |`,
+        (lang) =>
+          `| ${LANGUAGE_DISPLAY[lang]} | \`${SDK_INSTALL_DOCS_BASE}#${lang}\` |`,
       )
       .join("\n");
     installSdkContext = `### 3. Install SDK (Language-Specific)
@@ -169,7 +163,7 @@ ${INSTALL_SDK_REQUIREMENTS}`;
 The target language has been specified: **${LANGUAGE_DISPLAY[lang]}**.`;
     installSdkContext = `### 3. Install SDK
 
-Read the install guide from the canonical docs: \`${SDK_INSTALL_DOCS_BASE}/${LANGUAGE_DOC_FILES[lang]}\`
+Read the install guide from the canonical docs: \`${SDK_INSTALL_DOCS_BASE}#${lang}\`
 
 Requirements:
 
@@ -183,8 +177,7 @@ ${INSTALL_SDK_REQUIREMENTS}`;
 Candidate languages detected: ${list}. Pick exactly one with the user before proceeding.`;
     const rows = opts.languages
       .map(
-        (l) =>
-          `| ${LANGUAGE_DISPLAY[l]} | \`${SDK_INSTALL_DOCS_BASE}/${LANGUAGE_DOC_FILES[l]}\` |`,
+        (l) => `| ${LANGUAGE_DISPLAY[l]} | \`${SDK_INSTALL_DOCS_BASE}#${l}\` |`,
       )
       .join("\n");
     installSdkContext = `### 3. Install SDK

@@ -9,8 +9,8 @@ import { AppRoot } from "../src/beau/AppRoot";
 import { ACCOUNT_QUESTION } from "../src/wizard-copy";
 
 const STRIP_PATTERN = /[▌▐]/;
-const LOGO_PATTERN = /[▀▄]/;
-const LOGO_BODY_SPLIT_PATTERN = /[█▀▄]{3,} +[█▀▄]{3,}/;
+const LOGO_PATTERN = /█/;
+const LOGO_BODY_SPLIT_PATTERN = /█{3,}[^█]+█{3,}/;
 const MIN_STRIP_MARKS_PER_LINE = 8;
 const LOGIN_BROWSER_PROMPT_START = "For the rest of the flow";
 const LOGIN_BROWSER_PROMPT_END = "open the browser?";
@@ -75,7 +75,6 @@ class TestStdin extends EventEmitter {
 
   setRawMode(isEnabled: boolean) {
     this.rawModeEnabled = isEnabled;
-
 
     return this;
   }
@@ -279,7 +278,6 @@ describe("App", () => {
     expect(easeLayoutTransitionProgress(1)).toBe(1);
   });
 
-
   it("renders the landing page with logo, account question, and strips", async () => {
     const { instance, lastFrame } = renderApp({ columns: 100, rows: 24 });
 
@@ -313,7 +311,6 @@ describe("App", () => {
     expect(stripLines(lastFrame()).join("\n")).not.toBe(initialStrips);
     expectFrameToFit(lastFrame(), 100, 24);
   });
-
 
   it("vertically centers the landing page content", async () => {
     const { instance, lastFrame } = renderApp({ columns: 100, rows: 24 });

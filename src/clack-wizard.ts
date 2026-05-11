@@ -264,10 +264,7 @@ async function runInstrumentation(
     languages: args.languages,
   });
   notifyPiRunning(false);
-  if (
-    harnessResult.status === "completed" &&
-    harnessResult.exitCode !== 0
-  ) {
+  if (harnessResult.status === "completed" && harnessResult.exitCode !== 0) {
     markTelemetrySigint();
   }
 

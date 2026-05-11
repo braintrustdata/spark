@@ -87,9 +87,7 @@ const piJs = resolvePiJs();
 // spawn args: if we found the JS file, use `node <file>`; else fall back to
 // spawning the `pi` executable directly (works if installed globally as a
 // real binary rather than a pnpm shim).
-const [spawnBin, spawnArgs] = piJs
-  ? [process.execPath, [piJs]]
-  : ["pi", []];
+const [spawnBin, spawnArgs] = piJs ? [process.execPath, [piJs]] : ["pi", []];
 
 const piArgs = [
   "--no-session",
@@ -134,8 +132,9 @@ const piProc = pty.spawn(spawnBin, [...spawnArgs, ...piArgs], {
 // ---------------------------------------------------------------------------
 
 // Scan a sliding window so "summary" split across chunks is still caught.
-const SUMMARY_WORD = "INSTRUMENTATION_COMPLETE";
-const WINDOW = SUMMARY_WORD.length - 1;
+const SENTINEL_COMPLETE = "INSTRUMENTATION_COMPLETE";
+const SENTINEL_INCOMPLETE = "INSTRUMENTATION_INCOMPLETE";
+const WINDOW = SENTINEL_INCOMPLETE.length - 1; // longest sentinel
 
 let tail = "";
 let summaryDetected = false;
@@ -171,7 +170,7 @@ piProc.onData((data) => {
   }
 
   const text = tail + data;
-  if (text.toLowerCase().includes(SUMMARY_WORD)) {
+  if (text.includes(SENTINEL_COMPLETE) || text.includes(SENTINEL_INCOMPLETE)) {
     summaryDetected = true;
     scheduleShutdown();
   } else {

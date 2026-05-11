@@ -28,7 +28,9 @@ function resolveHarnessPath():
  * a saved prompt file. Returns undefined if the harness binary cannot be
  * resolved.
  */
-export function buildHarnessCommand(promptFilePath: string): string | undefined {
+export function buildHarnessCommand(
+  promptFilePath: string,
+): string | undefined {
   const resolved = resolveHarnessPath();
   if (!resolved.ok) {
     return undefined;

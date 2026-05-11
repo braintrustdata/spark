@@ -8,7 +8,11 @@ import {
   WizardCancelledError,
 } from "./clack-wizard";
 import { helpText, parseArgs } from "./options";
-import { startTelemetry, finishTelemetry, markTelemetrySigint } from "./telemetry";
+import {
+  startTelemetry,
+  finishTelemetry,
+  markTelemetrySigint,
+} from "./telemetry";
 
 const parsed = parseArgs(process.argv.slice(2), process.env);
 

@@ -70,10 +70,11 @@ export function startTelemetry(env: NodeJS.ProcessEnv): void {
       sigintReceived = true;
     },
   };
-
 }
 
-export function setTelemetryLanguage(language: DetectedLanguage | "unknown"): void {
+export function setTelemetryLanguage(
+  language: DetectedLanguage | "unknown",
+): void {
   child?.write({ language });
 }
 

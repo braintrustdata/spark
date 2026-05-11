@@ -57,7 +57,12 @@ async function send(): Promise<void> {
     try {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-      await fetch(TELEMETRY_URL, { method: "POST", headers, body, signal: controller.signal });
+      await fetch(TELEMETRY_URL, {
+        method: "POST",
+        headers,
+        body,
+        signal: controller.signal,
+      });
       clearTimeout(timer);
       return;
     } catch {

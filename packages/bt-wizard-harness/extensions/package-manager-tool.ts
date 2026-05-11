@@ -57,69 +57,133 @@ type Language = "python" | "typescript" | "go" | "csharp" | "java" | "ruby";
 const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
   python: [
     // interpreters
-    "python", "python3",
+    "python",
+    "python3",
     // package managers
-    "conda", "hatch", "mamba", "pdm", "pip", "pipenv", "pipx", "poetry", "rye", "uv",
+    "conda",
+    "hatch",
+    "mamba",
+    "pdm",
+    "pip",
+    "pipenv",
+    "pipx",
+    "poetry",
+    "rye",
+    "uv",
     // formatters
-    "autopep8", "black", "isort", "yapf",
+    "autopep8",
+    "black",
+    "isort",
+    "yapf",
     // linters
-    "flake8", "mypy", "pylint", "pyright",
+    "flake8",
+    "mypy",
+    "pylint",
+    "pyright",
     // ruff handles both formatting and linting
     "ruff",
     // test
-    "coverage", "nose2", "pytest", "tox", "unittest",
+    "coverage",
+    "nose2",
+    "pytest",
+    "tox",
+    "unittest",
   ],
   typescript: [
     // interpreters / runtimes
-    "node", "npx", "ts-node", "tsx",
+    "node",
+    "npx",
+    "ts-node",
+    "tsx",
     // package managers (bun and deno double as runtimes)
-    "bun", "deno", "ni", "npm", "pnpm", "yarn",
+    "bun",
+    "deno",
+    "ni",
+    "npm",
+    "pnpm",
+    "yarn",
     // formatters
-    "dprint", "prettier",
+    "dprint",
+    "prettier",
     // linters
-    "eslint", "oxlint",
+    "eslint",
+    "oxlint",
     // biome handles formatting + linting
     "biome",
     // test
-    "ava", "jasmine", "jest", "mocha", "vitest",
+    "ava",
+    "jasmine",
+    "jest",
+    "mocha",
+    "vitest",
   ],
   go: [
     // interpreter/compiler (go run, go build, go test, go mod …)
-    "dep", "glide", "go",
+    "dep",
+    "glide",
+    "go",
     // formatters
-    "gofmt", "gofumpt", "goimports",
+    "gofmt",
+    "gofumpt",
+    "goimports",
     // linters
-    "golangci-lint", "revive", "staticcheck",
+    "golangci-lint",
+    "revive",
+    "staticcheck",
     // test (go test is via "go", others are standalone)
-    "ginkgo", "gomock", "testify",
+    "ginkgo",
+    "gomock",
+    "testify",
   ],
   csharp: [
     // runtime / package managers / build — dotnet covers all of these
     "dotnet",
     // package managers
-    "choco", "nuget", "paket",
+    "choco",
+    "nuget",
+    "paket",
     // formatters + linters
     "csharpier",
   ],
   java: [
     // interpreter / compiler
-    "java", "javac",
+    "java",
+    "javac",
     // package managers / build tools
-    "bazel", "gradle", "ivy", "mvn", "mill", "sbt",
+    "bazel",
+    "gradle",
+    "ivy",
+    "mvn",
+    "mill",
+    "sbt",
     // formatters / linters
-    "checkstyle", "google-java-format", "spotless", "pmd", "spotbugs",
+    "checkstyle",
+    "google-java-format",
+    "spotless",
+    "pmd",
+    "spotbugs",
   ],
   ruby: [
     // interpreter
     "ruby",
     // package managers
-    "asdf", "bundle", "gem", "rbenv", "rvm",
+    "asdf",
+    "bundle",
+    "gem",
+    "rbenv",
+    "rvm",
     // formatters + linters (rubocop / standardrb handle both)
-    "rubocop", "rufo", "standardrb",
+    "rubocop",
+    "rufo",
+    "standardrb",
     // linters
-    "brakeman", "reek",
+    "brakeman",
+    "reek",
     // test
-    "cucumber", "minitest", "rspec", "test-unit",
+    "cucumber",
+    "minitest",
+    "rspec",
+    "test-unit",
   ],
 };
 
@@ -176,7 +240,10 @@ type PkgParams = {
 const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_STREAM_BYTES = 500;
 
-function tailTruncate(s: string, maxBytes: number): { text: string; truncated: boolean } {
+function tailTruncate(
+  s: string,
+  maxBytes: number,
+): { text: string; truncated: boolean } {
   const buf = Buffer.from(s, "utf8");
   if (buf.byteLength <= maxBytes) return { text: s, truncated: false };
   return { text: buf.slice(-maxBytes).toString("utf8"), truncated: true };
@@ -212,8 +279,12 @@ function runPkg(
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (d: string) => { stdoutChunks.push(d); });
-    child.stderr.on("data", (d: string) => { stderrChunks.push(d); });
+    child.stdout.on("data", (d: string) => {
+      stdoutChunks.push(d);
+    });
+    child.stderr.on("data", (d: string) => {
+      stderrChunks.push(d);
+    });
 
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -258,15 +329,28 @@ export default function packageManagerTool(pi: ExtensionAPI) {
     renderShell: "self",
     renderCall(args: PkgParams, theme: Theme) {
       const cmd = [args.manager, ...args.args].join(" ");
-      return new Text(theme.fg("toolTitle", "$ ") + theme.fg("accent", cmd), 0, 0);
+      return new Text(
+        theme.fg("toolTitle", "$ ") + theme.fg("accent", cmd),
+        0,
+        0,
+      );
     },
     renderResult(result, _options, theme, context) {
-      const details = result.details as { exitCode?: number; timedOut?: boolean; blocked?: boolean } | undefined;
+      const details = result.details as
+        | { exitCode?: number; timedOut?: boolean; blocked?: boolean }
+        | undefined;
       const a = context.args as PkgParams;
       const cmd = [a.manager, ...a.args].join(" ");
 
       if (details?.blocked) {
-        return new Text(theme.fg("toolTitle", "$ ") + theme.fg("accent", cmd) + "  →  " + theme.fg("error", "blocked"), 0, 0);
+        return new Text(
+          theme.fg("toolTitle", "$ ") +
+            theme.fg("accent", cmd) +
+            "  →  " +
+            theme.fg("error", "blocked"),
+          0,
+          0,
+        );
       }
 
       const exitCode = details?.exitCode ?? -1;
@@ -277,7 +361,14 @@ export default function packageManagerTool(pi: ExtensionAPI) {
           ? theme.fg("success", `exit ${exitCode}`)
           : theme.fg("error", `exit ${exitCode}`);
 
-      return new Text(theme.fg("toolTitle", "$ ") + theme.fg("accent", cmd) + "  →  " + status, 0, 0);
+      return new Text(
+        theme.fg("toolTitle", "$ ") +
+          theme.fg("accent", cmd) +
+          "  →  " +
+          status,
+        0,
+        0,
+      );
     },
     async execute(_toolCallId, params) {
       const p = params as PkgParams;

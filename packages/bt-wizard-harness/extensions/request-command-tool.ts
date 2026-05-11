@@ -12,11 +12,15 @@
 import { spawn } from "node:child_process";
 import { Type } from "typebox";
 
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
 
 const REQUEST_PARAMS = Type.Object({
   command: Type.String({
-    description: "The executable or script to run (e.g. 'npx', 'node', 'make').",
+    description:
+      "The executable or script to run (e.g. 'npx', 'node', 'make').",
   }),
   args: Type.Array(Type.String(), {
     description: "Arguments for the command (no shell expansion).",
@@ -121,13 +125,21 @@ export default function requestCommandTool(pi: ExtensionAPI) {
       "The user sees the full command and reason before deciding.",
     ],
     parameters: REQUEST_PARAMS,
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx: ExtensionContext) {
+    async execute(
+      _toolCallId,
+      params,
+      _signal,
+      _onUpdate,
+      ctx: ExtensionContext,
+    ) {
       const p = params as RequestParams;
       const fullCommand = [p.command, ...p.args].join(" ");
 
       if (p.command === "sudo" || p.args.includes("sudo")) {
         return {
-          content: [{ type: "text", text: `Command denied: sudo is not allowed.` }],
+          content: [
+            { type: "text", text: `Command denied: sudo is not allowed.` },
+          ],
           details: { approved: false },
         };
       }
