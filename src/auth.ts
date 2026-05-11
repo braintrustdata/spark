@@ -39,7 +39,8 @@ export type WizardSigninEvents = {
 
 const POLL_INTERVAL_MS = 2000;
 const SLOW_DOWN_INCREMENT_MS = 1000;
-const POLL_HARD_TIMEOUT_MS = 30 * 60 * 1000;
+const MAX_POLL_INTERVAL_MS = 30_000;
+const POLL_HARD_TIMEOUT_MS = 3 * 60 * 1000;
 
 /**
  * Browser-mediated wizard sign-in.
@@ -58,7 +59,7 @@ const POLL_HARD_TIMEOUT_MS = 30 * 60 * 1000;
 export class WizardSigninAuthClient {
   constructor(
     private readonly appUrl: string,
-    private readonly clientName: string = "bt-wizard",
+    private readonly clientName: string = "crank",
   ) {}
 
   async createSession(): Promise<WizardSigninCreateResponse> {
@@ -96,14 +97,17 @@ export class WizardSigninAuthClient {
           Accept: "application/json",
         },
       });
+      if (res.status === 429) {
+        interval = Math.min(
+          interval + SLOW_DOWN_INCREMENT_MS,
+          MAX_POLL_INTERVAL_MS,
+        );
+        continue;
+      }
       const json = (await res.json().catch(() => ({}))) as Record<
         string,
         unknown
       >;
-      if (res.status === 429) {
-        interval += SLOW_DOWN_INCREMENT_MS;
-        continue;
-      }
       if (!res.ok) {
         throw new Error(
           `Wizard sign-in poll failed: ${res.status} ${JSON.stringify(json)}`,
