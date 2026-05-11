@@ -4,6 +4,7 @@ import { WizardSigninAuthClient } from "./auth";
 import { openBrowser } from "./browser";
 import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
 import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
+import { detectLanguages, type DetectedLanguage } from "./language-detect";
 import {
   allocateResultFile,
   buildHarnessCommand,
@@ -11,10 +12,15 @@ import {
   runHarness,
   writePromptToTemp,
 } from "./instrument";
-import { detectLanguages, type DetectedLanguage } from "./language-detect";
 import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
 import { LLM_PROVIDERS, type LlmProvider, type CredentialField } from "./providers";
+import {
+  setTelemetryLanguage,
+  setTelemetryProvider,
+  notifyPiRunning,
+  markTelemetrySigint,
+} from "./telemetry";
 import {
   DOCS_URL,
   NOT_GIT_REPO_WARNING,
@@ -23,8 +29,8 @@ import {
   RUN_HARNESS_QUESTION,
   WIZARD_CANCEL_MESSAGE,
   WIZARD_TITLE,
-  gitignoreNote,
   promptSavedNote,
+  gitignoreNote,
   wizardLoginPrompt,
 } from "./wizard-copy";
 
@@ -131,6 +137,8 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
   const canInstrument = !provider.custom && providerCredentials !== undefined;
   const languages = detectLanguages(deps.cwd);
+  setTelemetryLanguage(languages.length === 1 ? languages[0]! : "unknown");
+  setTelemetryProvider(provider.id);
 
   let tracePermalink: string | undefined;
   let resumeCommand: string | undefined;
@@ -257,6 +265,7 @@ async function runInstrumentation(
     interactive: true,
     resultFilePath,
   });
+  notifyPiRunning(true);
   const harnessResult = await runHarness({
     prompt: promptText,
     cwd: deps.cwd,
@@ -265,6 +274,10 @@ async function runInstrumentation(
     providerCredentials: args.providerCredentials,
     languages: args.languages,
   });
+  notifyPiRunning(false);
+  if (harnessResult.status === "completed" && harnessResult.exitCode !== 0) {
+    markTelemetrySigint();
+  }
 
   if (harnessResult.status === "harness-not-found") {
     const { path } = writePromptToTemp(promptText);
