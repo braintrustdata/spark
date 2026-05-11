@@ -44,7 +44,7 @@ type CurlParams = {
 };
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-const MAX_BODY_BYTES = 1_000_000;
+const MAX_BODY_BYTES = 1_000;
 
 const ALLOWED_METHODS = new Set(["GET", "HEAD"]);
 
@@ -153,17 +153,9 @@ export default function curlTool(pi: ExtensionAPI) {
     async execute(_toolCallId, params) {
       try {
         const result = await runCurl(params as CurlParams);
-        const headerLines = Object.entries(result.headers)
-          .map(([k, v]) => `${k}: ${v}`)
-          .join("\n");
-        const truncatedNote = result.truncated
-          ? "\n[body truncated to 1 MB]"
-          : "";
+        const truncatedNote = result.truncated ? "\n[truncated]" : "";
         const text = [
           `${result.status} ${result.statusText} (${result.url})`,
-          "--- headers ---",
-          headerLines,
-          "--- body ---",
           result.body + truncatedNote,
         ].join("\n");
         return {

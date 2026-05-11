@@ -13,6 +13,7 @@
   ],
   "dependencies": {
     "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*",
     "node-pty": "^1.1.0",
     "typebox": "^1.1.24"
   },

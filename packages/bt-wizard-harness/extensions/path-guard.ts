@@ -122,6 +122,7 @@ export default function pathGuard(pi: ExtensionAPI) {
     if (!ctx.hasUI) {
       return;
     }
+    ctx.ui.setToolsExpanded(false);
     ctx.ui.notify(
       `bt-wizard path-guard active: cwd=${cwdAbs}${
         exceptions.length > 0 ? `, exception=${exceptions.join(", ")}` : ""

@@ -49,12 +49,15 @@
 import { spawn } from "node:child_process";
 import { Type } from "typebox";
 
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@mariozechner/pi-coding-agent";
+import { Text } from "@mariozechner/pi-tui";
 
 type Language = "python" | "typescript" | "go" | "csharp" | "java" | "ruby";
 
 const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
   python: [
+    // interpreters
+    "python", "python3",
     // package managers
     "conda", "hatch", "mamba", "pdm", "pip", "pipenv", "pipx", "poetry", "rye", "uv",
     // formatters
@@ -67,7 +70,9 @@ const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
     "coverage", "nose2", "pytest", "tox", "unittest",
   ],
   typescript: [
-    // package managers
+    // interpreters / runtimes
+    "node", "npx", "ts-node", "tsx",
+    // package managers (bun and deno double as runtimes)
     "bun", "deno", "ni", "npm", "pnpm", "yarn",
     // formatters
     "dprint", "prettier",
@@ -79,7 +84,7 @@ const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
     "ava", "jasmine", "jest", "mocha", "vitest",
   ],
   go: [
-    // package managers
+    // interpreter/compiler (go run, go build, go test, go mod …)
     "dep", "glide", "go",
     // formatters
     "gofmt", "gofumpt", "goimports",
@@ -89,18 +94,24 @@ const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
     "ginkgo", "gomock", "testify",
   ],
   csharp: [
+    // runtime / package managers / build — dotnet covers all of these
+    "dotnet",
     // package managers
-    "choco", "dotnet", "nuget", "paket",
-    // formatters + linters + test — most C# tooling goes through dotnet CLI
+    "choco", "nuget", "paket",
+    // formatters + linters
     "csharpier",
   ],
   java: [
+    // interpreter / compiler
+    "java", "javac",
     // package managers / build tools
     "bazel", "gradle", "ivy", "mvn", "mill", "sbt",
     // formatters / linters
     "checkstyle", "google-java-format", "spotless", "pmd", "spotbugs",
   ],
   ruby: [
+    // interpreter
+    "ruby",
     // package managers
     "asdf", "bundle", "gem", "rbenv", "rvm",
     // formatters + linters (rubocop / standardrb handle both)
@@ -112,9 +123,13 @@ const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
   ],
 };
 
-const ALL_TOOLS: ReadonlySet<string> = new Set(
-  (Object.values(LANGUAGE_TOOLS) as readonly string[][]).flat(),
-);
+// Always allowed regardless of detected language.
+const UNIVERSAL_TOOLS: ReadonlySet<string> = new Set(["env"]);
+
+const ALL_TOOLS: ReadonlySet<string> = new Set([
+  ...UNIVERSAL_TOOLS,
+  ...(Object.values(LANGUAGE_TOOLS) as readonly string[][]).flat(),
+]);
 
 function allowedTools(): ReadonlySet<string> {
   const raw = process.env["BT_WIZARD_LANGUAGES"] ?? "";
@@ -125,7 +140,7 @@ function allowedTools(): ReadonlySet<string> {
   if (langs.length === 0) {
     return ALL_TOOLS;
   }
-  const allowed = new Set<string>();
+  const allowed = new Set<string>([...UNIVERSAL_TOOLS]);
   for (const lang of langs) {
     for (const tool of LANGUAGE_TOOLS[lang]) {
       allowed.add(tool);
@@ -159,7 +174,13 @@ type PkgParams = {
 };
 
 const DEFAULT_TIMEOUT_MS = 120_000;
-const MAX_OUTPUT_BYTES = 1_000_000;
+const MAX_STREAM_BYTES = 500;
+
+function tailTruncate(s: string, maxBytes: number): { text: string; truncated: boolean } {
+  const buf = Buffer.from(s, "utf8");
+  if (buf.byteLength <= maxBytes) return { text: s, truncated: false };
+  return { text: buf.slice(-maxBytes).toString("utf8"), truncated: true };
+}
 
 function runPkg(
   manager: string,
@@ -179,8 +200,6 @@ function runPkg(
       shell: false,
     });
 
-    let stdoutBytes = 0;
-    let stderrBytes = 0;
     const stdoutChunks: string[] = [];
     const stderrChunks: string[] = [];
     let timedOut = false;
@@ -193,14 +212,8 @@ function runPkg(
 
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (d: string) => {
-      stdoutBytes += Buffer.byteLength(d);
-      if (stdoutBytes < MAX_OUTPUT_BYTES) stdoutChunks.push(d);
-    });
-    child.stderr.on("data", (d: string) => {
-      stderrBytes += Buffer.byteLength(d);
-      if (stderrBytes < MAX_OUTPUT_BYTES) stderrChunks.push(d);
-    });
+    child.stdout.on("data", (d: string) => { stdoutChunks.push(d); });
+    child.stderr.on("data", (d: string) => { stderrChunks.push(d); });
 
     child.on("error", (err) => {
       clearTimeout(timer);
@@ -242,6 +255,30 @@ export default function packageManagerTool(pi: ExtensionAPI) {
       "The command runs in the current working directory.",
     ],
     parameters: PKG_PARAMS,
+    renderShell: "self",
+    renderCall(args: PkgParams, theme: Theme) {
+      const cmd = [args.manager, ...args.args].join(" ");
+      return new Text(theme.fg("toolTitle", "$ ") + theme.fg("accent", cmd), 0, 0);
+    },
+    renderResult(result, _options, theme, context) {
+      const details = result.details as { exitCode?: number; timedOut?: boolean; blocked?: boolean } | undefined;
+      const a = context.args as PkgParams;
+      const cmd = [a.manager, ...a.args].join(" ");
+
+      if (details?.blocked) {
+        return new Text(theme.fg("toolTitle", "$ ") + theme.fg("accent", cmd) + "  →  " + theme.fg("error", "blocked"), 0, 0);
+      }
+
+      const exitCode = details?.exitCode ?? -1;
+      const timedOut = details?.timedOut ?? false;
+      const status = timedOut
+        ? theme.fg("warning", `timed out (exit ${exitCode})`)
+        : exitCode === 0
+          ? theme.fg("success", `exit ${exitCode}`)
+          : theme.fg("error", `exit ${exitCode}`);
+
+      return new Text(theme.fg("toolTitle", "$ ") + theme.fg("accent", cmd) + "  →  " + status, 0, 0);
+    },
     async execute(_toolCallId, params) {
       const p = params as PkgParams;
       const mgr = p.manager.trim().toLowerCase();
@@ -268,22 +305,25 @@ export default function packageManagerTool(pi: ExtensionAPI) {
         p.timeout_ms ?? DEFAULT_TIMEOUT_MS,
         process.cwd(),
       );
+      const cmd = [mgr, ...p.args].join(" ");
       const summary = result.timedOut
-        ? `${mgr} timed out (exit ${result.exitCode})`
-        : `${mgr} exited ${result.exitCode}`;
+        ? `$ ${cmd}  →  timed out (exit ${result.exitCode})`
+        : `$ ${cmd}  →  exit ${result.exitCode}`;
+      const out = tailTruncate(result.stdout, MAX_STREAM_BYTES);
+      const err = tailTruncate(result.stderr, MAX_STREAM_BYTES);
+      const parts: string[] = [summary];
+      if (out.text) {
+        if (out.truncated) parts.push("--- stdout (last 500B) ---");
+        else parts.push("--- stdout ---");
+        parts.push(out.text);
+      }
+      if (err.text) {
+        if (err.truncated) parts.push("--- stderr (last 500B) ---");
+        else parts.push("--- stderr ---");
+        parts.push(err.text);
+      }
       return {
-        content: [
-          {
-            type: "text",
-            text: [
-              summary,
-              "--- stdout ---",
-              result.stdout,
-              "--- stderr ---",
-              result.stderr,
-            ].join("\n"),
-          },
-        ],
+        content: [{ type: "text", text: parts.join("\n") }],
         details: { exitCode: result.exitCode, timedOut: result.timedOut },
       };
     },
