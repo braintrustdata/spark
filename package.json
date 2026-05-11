@@ -29,6 +29,7 @@
     "react-devtools-core": "7.0.1"
   },
   "devDependencies": {
+    "@braintrust/proxy": "0.0.9",
     "@eslint/js": "10.0.1",
     "@types/node": "24.12.2",
     "@types/pngjs": "6.0.5",
