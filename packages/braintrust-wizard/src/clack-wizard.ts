@@ -27,7 +27,6 @@ import {
   promptSavedNote,
   wizardLoginPrompt,
 } from "./wizard-copy";
-import type { CredentialField } from "./providers";
 
 type SelectOption<T> = {
   readonly label: string;
@@ -110,9 +109,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   });
 
   const provider = await selectProvider(deps);
-  if (!provider.custom) {
-    await collectCredentials(prompts, provider);
-  }
+  const providerCredentials = provider.custom
+    ? undefined
+    : await collectCredentials(prompts, provider);
 
   const gitRoot = await findGitRoot(deps.cwd);
   if (gitRoot) {
@@ -225,32 +224,6 @@ type InstrumentationResult = {
   readonly tracePermalink: string | undefined;
   readonly resumeCommand: string | undefined;
 };
-
-async function collectCredentials(
-  prompts: ClackWizardPrompts,
-  provider: LlmProvider,
-): Promise<Record<string, string> | undefined> {
-  const fields: readonly CredentialField[] = provider.credentials ?? [
-    { envVar: provider.envVar!, label: provider.label, secret: true },
-  ];
-  const result: Record<string, string> = {};
-  for (const field of fields) {
-    const raw = unwrap(
-      prompts,
-      field.secret !== false
-        ? await prompts.password({ message: PROVIDER_KEY_QUESTION(field.label) })
-        : await prompts.text({ message: PROVIDER_KEY_QUESTION(field.label) }),
-    );
-    if (raw.length > 0) {
-      result[field.envVar] = raw;
-    }
-  }
-  if (Object.keys(result).length === 0) {
-    prompts.log.warn("No credentials entered; skipping instrumentation.");
-    return undefined;
-  }
-  return result;
-}
 
 async function runInstrumentation(
   deps: WizardDeps,
