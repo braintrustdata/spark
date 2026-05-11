@@ -27,7 +27,7 @@ const HEADER_GAP_WIDTH = 2;
 const MAX_STRIP_ROWS = 8;
 const PROMPT_MAX_WIDTH = 64;
 const STRIPS_TOP_MARGIN = 4;
-const SESSION_STRIP_BOTTOM_GAP = 2;
+const SESSION_STRIP_BOTTOM_GAP = 4;
 const HEADER_CONTENT_HEIGHT = 9;
 const LAYOUT_TRANSITION_TICKS = 12;
 const LAYOUT_TRANSITION_TICK_MS = 45;
@@ -55,6 +55,12 @@ function clamp(value: number, minimum: number, maximum: number) {
 
 function interpolate(start: number, end: number, progress: number) {
   return start + (end - start) * progress;
+}
+
+export function easeLayoutTransitionProgress(progress: number) {
+  const clampedProgress = clamp(progress, 0, 1);
+
+  return 1 - (1 - clampedProgress) ** 3;
 }
 
 function Spacer({ height }: { readonly height: number }) {
@@ -133,8 +139,11 @@ function TranscriptLine({ children, color, marker }: TranscriptLineProps) {
   );
 }
 
+function keepTuiInputAlive() {}
+
 export function App() {
   useQueryClient();
+  useInput(keepTuiInputAlive);
 
   const { columns, rows } = useWindowSize();
   const { hasBraintrustAccount, step } = useTuiState();
@@ -144,9 +153,12 @@ export function App() {
   const isTerminalTooSmall =
     rows < MIN_TERMINAL_HEIGHT || columns < MIN_TERMINAL_WIDTH;
   const isTransitioningToSession = hasBraintrustAccount !== null;
-  const transitionProgress = isTransitioningToSession
+  const linearTransitionProgress = isTransitioningToSession
     ? layoutTransitionTick / LAYOUT_TRANSITION_TICKS
     : 0;
+  const transitionProgress = easeLayoutTransitionProgress(
+    linearTransitionProgress,
+  );
   const shouldRenderLogoBase = columns >= LOGO_MIN_WIDTH && rows >= 11;
   const shouldRenderStrips =
     !isTerminalTooSmall &&

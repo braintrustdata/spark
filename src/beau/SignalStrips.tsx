@@ -6,8 +6,9 @@ const LEFT_BLOCK = "▌";
 const RIGHT_BLOCK = "▐";
 const LEFT_SUBCOLUMN = 0b01;
 const RIGHT_SUBCOLUMN = 0b10;
-const STRIP_TICK_MS = 180;
+const STRIP_TICK_MS = 80;
 const BASE_LINE_SPACING = 5;
+const STRIP_SUBCOLUMN_SPEED_SCALE = BASE_LINE_SPACING * 2;
 const STRIP_PERIOD = 320;
 const FIRST_BLOCK_GAP_ROW = 1;
 const LAST_BLOCK_GAP_ROW = 4;
@@ -131,7 +132,9 @@ function rowPhase(row: number) {
 function worldSubColumn(column: number, row: number, elapsedMs: number) {
   const elapsedSeconds = elapsedMs / 1000;
   const drift =
-    Math.floor(elapsedSeconds * rowSpeed(row)) * rowDirection(row) + row * 53;
+    Math.floor(elapsedSeconds * rowSpeed(row) * STRIP_SUBCOLUMN_SPEED_SCALE) *
+      rowDirection(row) +
+    row * 53;
 
   return positiveModulo(column + drift, STRIP_PERIOD);
 }

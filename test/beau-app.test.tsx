@@ -4,12 +4,13 @@ import { render as inkRender, type Instance } from "ink";
 import React, { act } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { App } from "../src/beau/App";
+import { App, easeLayoutTransitionProgress } from "../src/beau/App";
 import { AppRoot } from "../src/beau/AppRoot";
 import { ACCOUNT_QUESTION } from "../src/wizard-copy";
 
 const STRIP_PATTERN = /[▌▐]/;
-const LOGO_PATTERN = /[▀▄]/;
+const LOGO_PATTERN = /█/;
+const LOGO_BODY_SPLIT_PATTERN = /█{3,}[^█]+█{3,}/;
 const MIN_STRIP_MARKS_PER_LINE = 8;
 const LOGIN_BROWSER_PROMPT_START = "For the rest of the flow";
 const LOGIN_BROWSER_PROMPT_END = "open the browser?";
@@ -57,6 +58,7 @@ class TestStdout extends EventEmitter {
 
 class TestStdin extends EventEmitter {
   readonly isTTY = true;
+  rawModeEnabled = false;
   private data: string | Uint8Array | null = null;
 
   write(data: string | Uint8Array) {
@@ -71,7 +73,9 @@ class TestStdin extends EventEmitter {
     return this;
   }
 
-  setRawMode() {
+  setRawMode(isEnabled: boolean) {
+    this.rawModeEnabled = isEnabled;
+
     return this;
   }
 
@@ -267,6 +271,13 @@ async function resizeTerminal({
 }
 
 describe("App", () => {
+  it("eases the session layout transition out", () => {
+    expect(easeLayoutTransitionProgress(0)).toBe(0);
+    expect(easeLayoutTransitionProgress(0.25)).toBeGreaterThan(0.25);
+    expect(easeLayoutTransitionProgress(0.75)).toBeGreaterThan(0.75);
+    expect(easeLayoutTransitionProgress(1)).toBe(1);
+  });
+
   it("renders the landing page with logo, account question, and strips", async () => {
     const { instance, lastFrame } = renderApp({ columns: 100, rows: 24 });
 
@@ -278,7 +289,26 @@ describe("App", () => {
     expect(lastFrame()).toContain("● Yes ○ No");
     expect(questionLine(lastFrame())).toContain("● Yes ○ No");
     expect(lastFrame()).toMatch(LOGO_PATTERN);
+    expect(lastFrame()).toMatch(LOGO_BODY_SPLIT_PATTERN);
     expect(lastFrame()).toMatch(STRIP_PATTERN);
+    expectFrameToFit(lastFrame(), 100, 24);
+  });
+
+  it("animates the signal strips during the brand fade-in", async () => {
+    const { instance, lastFrame } = renderApp({ columns: 100, rows: 24 });
+
+    await flushRender(instance);
+
+    const initialStrips = stripLines(lastFrame()).join("\n");
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, 120);
+    });
+    await act(async () => {
+      await flushRender(instance);
+    });
+
+    expect(stripLines(lastFrame()).join("\n")).not.toBe(initialStrips);
     expectFrameToFit(lastFrame(), 100, 24);
   });
 
@@ -319,7 +349,7 @@ describe("App", () => {
     const titleStart = line.indexOf("Braintrust Setup");
     const logoEnd = lastMatchIndex(line.slice(0, titleStart), LOGO_PATTERN) + 1;
 
-    expect(titleStart - logoEnd).toBeLessThanOrEqual(8);
+    expect(titleStart - logoEnd).toBeLessThanOrEqual(9);
     expectFrameToFit(lastFrame(), 100, 24);
   });
 
@@ -408,10 +438,10 @@ describe("App", () => {
     );
 
     expect(settledStripStartLine).toBeGreaterThan(initialStripStartLine);
-    expect(settledStripStartLine).toBe(30);
-    expect(settledStripEndLine).toBe(37);
+    expect(settledStripStartLine).toBe(28);
+    expect(settledStripEndLine).toBe(35);
     expect(bottomGapLines.every((line) => line.trim().length === 0)).toBe(true);
-    expect(bottomGapLines).toHaveLength(2);
+    expect(bottomGapLines).toHaveLength(4);
     expectFrameToFit(lastFrame(), 100, 40);
   });
 
@@ -446,13 +476,14 @@ describe("App", () => {
   });
 
   it("renders a compact fallback in a small terminal", async () => {
-    const { instance, lastFrame } = renderApp({ columns: 36, rows: 6 });
+    const { instance, lastFrame, stdin } = renderApp({ columns: 36, rows: 6 });
 
     await flushRender(instance);
 
     expect(lastFrame()).toContain("Resize terminal to continue.");
     expect(lastFrame()).toContain("36x6");
     expect(lastFrame()).not.toContain("Do you already have");
+    expect(stdin.rawModeEnabled).toBe(true);
     expectFrameToFit(lastFrame(), 36, 6);
   });
 
@@ -526,7 +557,7 @@ describe("App", () => {
   });
 
   it("reacts when the terminal shrinks", async () => {
-    const { instance, lastFrame, stdout } = renderApp({
+    const { instance, lastFrame, stdin, stdout } = renderApp({
       columns: 100,
       rows: 24,
     });
@@ -535,11 +566,13 @@ describe("App", () => {
 
     expect(lastFrame()).toContain("Do you already have");
     expect(lastFrame()).toMatch(STRIP_PATTERN);
+    expect(stdin.rawModeEnabled).toBe(true);
 
     await resizeTerminal({ instance, stdout, columns: 36, rows: 6 });
 
     expect(lastFrame()).toContain("Resize terminal to continue.");
     expect(lastFrame()).not.toContain("Do you already have");
+    expect(stdin.rawModeEnabled).toBe(true);
     expectFrameToFit(lastFrame(), 36, 6);
   });
 
