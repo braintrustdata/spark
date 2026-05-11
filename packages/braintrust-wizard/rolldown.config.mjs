@@ -5,7 +5,7 @@ export default defineConfig({
   output: {
     banner: "#!/usr/bin/env node",
     codeSplitting: false,
-    file: "dist/cli.js",
+    file: "dist/cli.mjs",
     format: "esm",
     sourcemap: true,
   },

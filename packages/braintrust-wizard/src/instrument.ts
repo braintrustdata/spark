@@ -1,22 +1,123 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir, platform } from "node:os";
+import { createHash } from "node:crypto";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { homedir, tmpdir, platform } from "node:os";
 import { join } from "node:path";
+import { getAsset, isSea } from "node:sea";
 import { fileURLToPath } from "node:url";
+
+import * as tar from "tar";
 
 import type { DetectedLanguage } from "./language-detect";
 
-const HARNESS_BIN_PATH = fileURLToPath(
-  import.meta
-    .resolve("@braintrust/bt-wizard-harness/bin/bt-wizard-harness.mjs"),
-);
+function extractHarnessFromAsset(): string {
+  const asset = Buffer.from(getAsset("harness.tgz"));
+  const hash = createHash("sha256").update(asset).digest("hex").slice(0, 16);
+  const cacheRoot = join(homedir(), ".cache", "crank");
+  const cacheDir = join(cacheRoot, hash);
+  const binPath = join(
+    cacheDir,
+    "bt-wizard-harness",
+    "bin",
+    "bt-wizard-harness.mjs",
+  );
+  if (existsSync(binPath)) return binPath;
+
+  mkdirSync(cacheRoot, { recursive: true });
+  const staging = mkdtempSync(join(cacheRoot, `.tmp-${hash}-`));
+  try {
+    // Cross-platform replacement for `tar -xzf`: the `tar` package's sync
+    // file-based extract works on Windows where no system `tar` is guaranteed.
+    const tgzPath = join(staging, "harness.tgz");
+    writeFileSync(tgzPath, asset);
+    tar.x({ sync: true, file: tgzPath, cwd: staging, gzip: true });
+    rmSync(tgzPath);
+    try {
+      renameSync(staging, cacheDir);
+    } catch (err) {
+      if (existsSync(binPath)) {
+        rmSync(staging, { recursive: true, force: true });
+        return binPath;
+      }
+      throw err;
+    }
+  } catch (err) {
+    rmSync(staging, { recursive: true, force: true });
+    throw err;
+  }
+  return binPath;
+}
+
+export function resolveHarnessBinPath(): string {
+  const override = process.env.BT_WIZARD_HARNESS_BIN;
+  if (override) return override;
+  if (isSea()) {
+    return extractHarnessFromAsset();
+  }
+  return fileURLToPath(
+    import.meta
+      .resolve("@braintrust/bt-wizard-harness/bin/bt-wizard-harness.mjs"),
+  );
+}
+
+/**
+ * The SEA injected main can only `import` built-in modules — dynamic `import()`
+ * of a file URL also hits that restriction. The documented escape hatch is
+ * `createRequire`, which loads CJS only, so we drop a tiny CJS shim next to
+ * the extracted harness whose only job is to dynamic-`import()` the .mjs
+ * (which works because the shim is a real file on disk, not the injected main).
+ */
+export function resolveHarnessBootstrapPath(): string {
+  const binPath = resolveHarnessBinPath();
+  const bootstrapPath = binPath.replace(/\.mjs$/, ".bootstrap.cjs");
+  if (existsSync(bootstrapPath)) return bootstrapPath;
+  const contents =
+    "const { pathToFileURL } = require('node:url');\n" +
+    "const { join, dirname } = require('node:path');\n" +
+    "const target = pathToFileURL(join(dirname(__filename), 'bt-wizard-harness.mjs')).href;\n" +
+    "import(target).catch((err) => { console.error(err); process.exit(1); });\n";
+  writeFileSync(bootstrapPath, contents);
+  return bootstrapPath;
+}
+
+/**
+ * Sentinel argv that the SEA main script dispatches on to launch the harness
+ * instead of the wizard. See cli.ts.
+ */
+export const HARNESS_SENTINEL_ARG = "__harness";
+
+const HARNESS_BIN_PATH = resolveHarnessBinPath();
+
+type HarnessLauncher = {
+  readonly command: string;
+  readonly leadingArgs: readonly string[];
+};
+
+function harnessLauncher(): HarnessLauncher {
+  // In a SEA, `node` may not exist on PATH — re-exec ourselves with the
+  // sentinel and let cli.ts dispatch into the harness.
+  if (isSea()) {
+    return { command: process.execPath, leadingArgs: [HARNESS_SENTINEL_ARG] };
+  }
+  return { command: "node", leadingArgs: [HARNESS_BIN_PATH] };
+}
 
 /**
  * Build the shell command a user can copy-paste to re-run the harness against
  * a saved prompt file.
  */
 export function buildHarnessCommand(promptFilePath: string): string {
-  return `node ${JSON.stringify(HARNESS_BIN_PATH)} --prompt-file ${JSON.stringify(promptFilePath)}`;
+  const { command, leadingArgs } = harnessLauncher();
+  const parts = [command, ...leadingArgs, "--prompt-file", promptFilePath];
+  return parts.map((p) => JSON.stringify(p)).join(" ");
 }
 
 export type InstallBtResult =
@@ -130,9 +231,10 @@ export async function runHarness(args: {
   // a missing file vs. an empty file are distinguishable.
   writeFileSync(args.resultFilePath, "");
   return new Promise((resolve) => {
+    const { command, leadingArgs } = harnessLauncher();
     const child = spawn(
-      "node",
-      [HARNESS_BIN_PATH, "--prompt-file", promptFile],
+      command,
+      [...leadingArgs, "--prompt-file", promptFile],
       {
         cwd: args.cwd,
         env: {
