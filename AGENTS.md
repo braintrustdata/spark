@@ -32,12 +32,21 @@ Default implementation work should go into the Clack implementation. Do not work
 - Keep beau Ink UI components focused on rendering and input handling.
 - Keep backend/API request logic out of presentation components; expose it through query or mutation hooks.
 
+## Workspace Layout
+
+This is a pnpm workspace. All packages live under `packages/`.
+
+- `packages/braintrust-wizard/` — the main wizard CLI (Clack + beau variants).
+- `packages/bt-wizard-harness/` — the pi-coding-agent harness scaffold.
+
+Root-level scripts (`pnpm build`, `pnpm lint`, etc.) delegate to the packages via `--filter` or `-r`.
+
 ## Implementation Notes
 
-- Source files live under `src/`.
-- Tests live under `test/`.
-- The default CLI entrypoint is `src/cli.ts`; Rolldown emits `dist/cli.js`.
-- The beau CLI entrypoint is `src/beau/cli.tsx`; Rolldown emits `dist/cli.beau.js`.
-- Shared wizard copy lives in `src/wizard-copy.ts`; keep both variants using it.
-- `src/query-client.ts` owns QueryClient creation and should remain the central place for query defaults.
+- Wizard source files live under `packages/braintrust-wizard/src/`.
+- Wizard tests live under `packages/braintrust-wizard/test/`.
+- The default CLI entrypoint is `packages/braintrust-wizard/src/cli.ts`; Rolldown emits `packages/braintrust-wizard/dist/cli.js`.
+- The beau CLI entrypoint is `packages/braintrust-wizard/src/beau/cli.tsx`; Rolldown emits `packages/braintrust-wizard/dist/cli.beau.js`.
+- Shared wizard copy lives in `packages/braintrust-wizard/src/wizard-copy.ts`; keep both variants using it.
+- `packages/braintrust-wizard/src/query-client.ts` owns QueryClient creation and should remain the central place for query defaults.
 - Do not add SEA packaging yet; the current build targets are JavaScript bundles.
