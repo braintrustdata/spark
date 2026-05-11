@@ -87,7 +87,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   const { prompts } = deps;
   prompts.intro(WIZARD_TITLE);
 
-  if (!isGitRepo(deps.cwd)) {
+  if (!(await isGitRepo(deps.cwd))) {
     prompts.log.warn(NOT_GIT_REPO_WARNING);
   }
 
@@ -99,13 +99,13 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   });
 
   const provider = await selectProvider(deps);
-  const providerCredentials = provider.custom
-    ? undefined
-    : await collectCredentials(prompts, provider);
+  if (!provider.custom) {
+    await collectCredentials(prompts, provider);
+  }
 
-  const gitRoot = findGitRoot(deps.cwd);
+  const gitRoot = await findGitRoot(deps.cwd);
   if (gitRoot) {
-    const result = writeEnvBraintrust(gitRoot, session.apiKey);
+    const result = await writeEnvBraintrust(gitRoot, session.apiKey);
     prompts.log.success(`Wrote ${result.envFilePath}`);
     prompts.log.info(
       gitignoreNote({
