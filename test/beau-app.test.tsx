@@ -9,8 +9,8 @@ import { AppRoot } from "../src/beau/AppRoot";
 import { ACCOUNT_QUESTION } from "../src/wizard-copy";
 
 const STRIP_PATTERN = /[▌▐]/;
-const LOGO_PATTERN = /[▀▄]/;
-const LOGO_BODY_SPLIT_PATTERN = /[█▀▄]{3,} +[█▀▄]{3,}/;
+const LOGO_PATTERN = /[▟▜▘▝▖▗▙▛█]/;
+const LOGO_BODY_SPLIT_PATTERN = /[█]{3,}[▌▐]+[█]{3,}/;
 const MIN_STRIP_MARKS_PER_LINE = 8;
 const LOGIN_BROWSER_PROMPT_START = "For the rest of the flow";
 const LOGIN_BROWSER_PROMPT_END = "open the browser?";
