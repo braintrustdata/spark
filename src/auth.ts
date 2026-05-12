@@ -41,6 +41,8 @@ const POLL_INTERVAL_MS = 2000;
 const SLOW_DOWN_INCREMENT_MS = 1000;
 const MAX_POLL_INTERVAL_MS = 30_000;
 const POLL_HARD_TIMEOUT_MS = 3 * 60 * 1000;
+const CREATE_REQUEST_TIMEOUT_MS = 15_000;
+const POLL_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
  * Browser-mediated wizard sign-in.
@@ -70,6 +72,7 @@ export class WizardSigninAuthClient {
         Accept: "application/json",
       },
       body: JSON.stringify({ client_name: this.clientName }),
+      signal: AbortSignal.timeout(CREATE_REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
       throw new Error(
@@ -96,12 +99,14 @@ export class WizardSigninAuthClient {
           Authorization: `Bearer ${args.pollToken}`,
           Accept: "application/json",
         },
+        signal: AbortSignal.timeout(POLL_REQUEST_TIMEOUT_MS),
       });
       if (res.status === 429) {
         interval = Math.min(
           interval + SLOW_DOWN_INCREMENT_MS,
           MAX_POLL_INTERVAL_MS,
         );
+        res.body?.cancel();
         continue;
       }
       const json = (await res.json().catch(() => ({}))) as Record<
