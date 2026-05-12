@@ -1,5 +1,6 @@
 import { access, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import ignore from "ignore";
 
 async function pathExists(p: string): Promise<boolean> {
   return access(p).then(
@@ -32,7 +33,7 @@ const ENV_FILENAME = ".env.braintrust";
 
 export type EnvFileWriteResult = {
   readonly envFilePath: string;
-  readonly gitignorePath: string | undefined;
+  readonly gitignorePath: string;
   readonly addedToGitignore: boolean;
   readonly alreadyCovered: boolean;
 };
@@ -72,29 +73,5 @@ export async function writeEnvBraintrust(
 }
 
 export function gitignoreCovers(content: string, filename: string): boolean {
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim();
-    if (line.length === 0 || line.startsWith("#") || line.startsWith("!")) {
-      continue;
-    }
-    if (matchesGitignorePattern(line, filename)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function matchesGitignorePattern(pattern: string, filename: string): boolean {
-  let p = pattern;
-  if (p.startsWith("/")) {
-    p = p.slice(1);
-  }
-  if (p.endsWith("/")) {
-    return false;
-  }
-  const regexSrc = `^${p
-    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
-    .replace(/\*/g, ".*")
-    .replace(/\?/g, ".")}$`;
-  return new RegExp(regexSrc).test(filename);
+  return ignore().add(content).ignores(filename);
 }
