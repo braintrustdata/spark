@@ -14,7 +14,7 @@ import {
 import { detectLanguages, type DetectedLanguage } from "./language-detect";
 import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
-import { LLM_PROVIDERS, type LlmProvider } from "./providers";
+import { LLM_PROVIDERS, type LlmProvider, type CredentialField } from "./providers";
 import {
   DOCS_URL,
   NOT_GIT_REPO_WARNING,
@@ -130,7 +130,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
   }
 
-  const canInstrument = !provider.custom && providerKey !== undefined;
+  const canInstrument = !provider.custom && providerCredentials !== undefined;
   const languages = detectLanguages(deps.cwd);
 
   let tracePermalink: string | undefined;
@@ -148,8 +148,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
         org: session.orgInfo.name,
         project: session.project.name,
         apiKey: session.apiKey,
-        providerEnvVar: provider.envVar,
-        providerApiKey: providerKey,
+        providerCredentials,
         languages,
       });
       tracePermalink = result.tracePermalink;
@@ -227,14 +226,39 @@ type InstrumentationResult = {
   readonly resumeCommand: string | undefined;
 };
 
+async function collectCredentials(
+  prompts: ClackWizardPrompts,
+  provider: LlmProvider,
+): Promise<Record<string, string> | undefined> {
+  const fields: readonly CredentialField[] = provider.credentials ?? [
+    { envVar: provider.envVar!, label: provider.label, secret: true },
+  ];
+  const result: Record<string, string> = {};
+  for (const field of fields) {
+    const raw = unwrap(
+      prompts,
+      field.secret !== false
+        ? await prompts.password({ message: PROVIDER_KEY_QUESTION(field.label) })
+        : await prompts.text({ message: PROVIDER_KEY_QUESTION(field.label) }),
+    );
+    if (raw.length > 0) {
+      result[field.envVar] = raw;
+    }
+  }
+  if (Object.keys(result).length === 0) {
+    prompts.log.warn("No credentials entered; skipping instrumentation.");
+    return undefined;
+  }
+  return result;
+}
+
 async function runInstrumentation(
   deps: WizardDeps,
   args: {
     readonly org: string;
     readonly project: string;
     readonly apiKey: string;
-    readonly providerEnvVar?: string;
-    readonly providerApiKey?: string;
+    readonly providerCredentials?: Readonly<Record<string, string>>;
     readonly languages: readonly DetectedLanguage[];
   },
 ): Promise<InstrumentationResult> {
@@ -265,8 +289,7 @@ async function runInstrumentation(
     cwd: deps.cwd,
     braintrustApiKey: args.apiKey,
     resultFilePath,
-    providerEnvVar: args.providerEnvVar,
-    providerApiKey: args.providerApiKey,
+    providerCredentials: args.providerCredentials,
     languages: args.languages,
   });
 
