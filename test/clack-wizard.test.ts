@@ -147,7 +147,6 @@ function buildDeps(args: {
     },
     prompts: args.prompts,
     authClient: stubAuth,
-    fuzzy: async ({ choices }) => choices[0]!.value,
     openBrowser: async () => true,
   };
 }
