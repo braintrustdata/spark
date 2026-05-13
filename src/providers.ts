@@ -1,18 +1,31 @@
 /**
- * LLM providers shown in the wizard. The list mirrors the API-key entries in
- * `AISecretTypes` from `@braintrust/proxy/schema` — the providers users
- * configure with a single API key. Cloud providers (Bedrock, Vertex, Azure,
- * Databricks) use multi-field credentials and are intentionally excluded.
+ * LLM providers shown in the wizard.
  *
- * Drift is enforced by `test/providers.test.ts`, which imports
- * `@braintrust/proxy/schema` (devDep) and asserts equality against this list.
+ * Single-key providers (most): set `envVar` — one API key is collected and
+ * passed to the harness as that env var. The list of single-key providers
+ * mirrors `AISecretTypes` from `@braintrust/proxy/schema`; drift is enforced
+ * by `test/providers.test.ts`.
  *
- * If `custom: true`, no API key is requested and instrumentation is skipped.
+ * Multi-credential providers (Bedrock, Vertex, Azure): set `credentials` with
+ * one entry per env var. Each field is prompted individually; all are passed
+ * to the harness.
+ *
+ * If `custom: true`, no credentials are requested and instrumentation is
+ * skipped.
  */
+export type CredentialField = {
+  readonly envVar: string;
+  readonly label: string;
+  readonly secret?: boolean;
+};
+
 export type LlmProvider = {
   readonly id: string;
   readonly label: string;
+  /** Single-key providers: the env var for the API key. */
   readonly envVar?: string;
+  /** Multi-credential providers: one entry per env var to collect. */
+  readonly credentials?: readonly CredentialField[];
   readonly custom?: boolean;
 };
 
@@ -30,5 +43,39 @@ export const LLM_PROVIDERS: readonly LlmProvider[] = [
   { id: "cerebras", label: "Cerebras", envVar: "CEREBRAS_API_KEY" },
   { id: "replicate", label: "Replicate", envVar: "REPLICATE_API_KEY" },
   { id: "baseten", label: "Baseten", envVar: "BASETEN_API_KEY" },
+  {
+    id: "bedrock",
+    label: "AWS Bedrock",
+    credentials: [
+      { envVar: "AWS_ACCESS_KEY_ID", label: "Access Key ID" },
+      {
+        envVar: "AWS_SECRET_ACCESS_KEY",
+        label: "Secret Access Key",
+        secret: true,
+      },
+      { envVar: "AWS_REGION", label: "Region" },
+    ],
+  },
+  {
+    id: "vertex",
+    label: "Google Vertex AI",
+    credentials: [
+      { envVar: "GOOGLE_CLOUD_PROJECT", label: "Project ID" },
+      { envVar: "GOOGLE_CLOUD_LOCATION", label: "Location (e.g. us-central1)" },
+      {
+        envVar: "GOOGLE_APPLICATION_CREDENTIALS",
+        label: "Path to service account JSON",
+      },
+    ],
+  },
+  {
+    id: "azure",
+    label: "Azure OpenAI",
+    credentials: [
+      { envVar: "AZURE_OPENAI_API_KEY", label: "API Key", secret: true },
+      { envVar: "AZURE_OPENAI_ENDPOINT", label: "Endpoint URL" },
+      { envVar: "AZURE_OPENAI_DEPLOYMENT", label: "Deployment name" },
+    ],
+  },
   { id: "custom", label: "Custom (self-hosted, skip API key)", custom: true },
 ];
