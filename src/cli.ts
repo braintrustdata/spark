@@ -9,12 +9,7 @@ import {
 } from "./clack-wizard";
 import { helpText, parseArgs } from "./options";
 
-const parsed = parseArgs(process.argv.slice(2), process.env);
-
-if (parsed.help) {
-  process.stdout.write(helpText());
-  process.exit(0);
-}
+const parsed = await parseArgs(process.argv.slice(2), process.env);
 
 // `NODE_EXTRA_CA_CERTS` is read once at Node startup, so we can't apply it
 // in-process. If --ca-cert (or BRAINTRUST_CA_CERT / SSL_CERT_FILE) was set
