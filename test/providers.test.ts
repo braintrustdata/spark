@@ -10,11 +10,9 @@ const KNOWN_AHEAD: ReadonlySet<string> = new Set(["baseten"]);
 
 // Multi-credential providers use several env vars instead of a single API key
 // and are intentionally absent from AISecretTypes.
-const MULTI_CREDENTIAL: ReadonlySet<string> = new Set([
-  "bedrock",
-  "vertex",
-  "azure",
-]);
+const MULTI_CREDENTIAL: ReadonlySet<string> = new Set(
+  LLM_PROVIDERS.filter((p) => p.credentials !== undefined).map((p) => p.id),
+);
 
 function envVarToProviderId(envVar: string): string {
   return envVar.toLowerCase().replace(/_api_key$/, "");
@@ -53,17 +51,15 @@ describe("LLM_PROVIDERS sync with @braintrust/proxy/schema", () => {
       if (provider.custom) continue;
       if (KNOWN_AHEAD.has(provider.id)) continue;
       if (MULTI_CREDENTIAL.has(provider.id)) continue;
-      expect(provider.envVar).toBeDefined();
-      expect(envVars.has(provider.envVar!)).toBe(true);
+      expect(envVars.has(provider.envVar)).toBe(true);
     }
   });
 
-  it("multi-credential providers have at least one credential field each", () => {
-    for (const id of MULTI_CREDENTIAL) {
-      const provider = LLM_PROVIDERS.find((p) => p.id === id);
-      expect(provider).toBeDefined();
-      expect(provider!.credentials).toBeDefined();
-      expect(provider!.credentials!.length).toBeGreaterThan(0);
+  it("multi-credential providers each have at least one credential field", () => {
+    for (const provider of LLM_PROVIDERS.filter(
+      (p) => p.credentials !== undefined,
+    )) {
+      expect(provider.credentials!.length).toBeGreaterThan(0);
     }
   });
 });
