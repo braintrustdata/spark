@@ -14,7 +14,11 @@ import {
 import { detectLanguages, type DetectedLanguage } from "./language-detect";
 import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
-import { LLM_PROVIDERS, type LlmProvider } from "./providers";
+import {
+  LLM_PROVIDERS,
+  type LlmProvider,
+  type CredentialField,
+} from "./providers";
 import {
   DOCS_URL,
   NOT_GIT_REPO_WARNING,
@@ -27,7 +31,6 @@ import {
   promptSavedNote,
   wizardLoginPrompt,
 } from "./wizard-copy";
-import type { CredentialField } from "./providers";
 
 type SelectOption<T> = {
   readonly label: string;
@@ -110,8 +113,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   });
 
   const provider = await selectProvider(deps);
+  let providerCredentials: Record<string, string> | undefined;
   if (!provider.custom) {
-    await collectCredentials(prompts, provider);
+    providerCredentials = await collectCredentials(prompts, provider);
   }
 
   const gitRoot = await findGitRoot(deps.cwd);
@@ -130,7 +134,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
   }
 
-  const canInstrument = !provider.custom && providerKey !== undefined;
+  const canInstrument = !provider.custom && providerCredentials !== undefined;
   const languages = detectLanguages(deps.cwd);
 
   let tracePermalink: string | undefined;
@@ -148,8 +152,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
         org: session.orgInfo.name,
         project: session.project.name,
         apiKey: session.apiKey,
-        providerEnvVar: provider.envVar,
-        providerApiKey: providerKey,
+        providerCredentials,
         languages,
       });
       tracePermalink = result.tracePermalink;
@@ -234,8 +237,7 @@ async function runInstrumentation(
     readonly org: string;
     readonly project: string;
     readonly apiKey: string;
-    readonly providerEnvVar?: string;
-    readonly providerApiKey?: string;
+    readonly providerCredentials?: Readonly<Record<string, string>>;
     readonly languages: readonly DetectedLanguage[];
   },
 ): Promise<InstrumentationResult> {
@@ -266,8 +268,7 @@ async function runInstrumentation(
     cwd: deps.cwd,
     braintrustApiKey: args.apiKey,
     resultFilePath,
-    providerEnvVar: args.providerEnvVar,
-    providerApiKey: args.providerApiKey,
+    providerCredentials: args.providerCredentials,
     languages: args.languages,
   });
 
