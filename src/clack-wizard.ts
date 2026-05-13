@@ -3,7 +3,6 @@ import { cwd as processCwd } from "node:process";
 import { WizardSigninAuthClient } from "./auth";
 import { openBrowser } from "./browser";
 import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
-import { fuzzySelect } from "./fuzzy";
 import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
 import type { WizardOptions } from "./options";
 import { LLM_PROVIDERS, type LlmProvider } from "./providers";
@@ -17,6 +16,7 @@ import {
   gitignoreNote,
   wizardLoginPrompt,
 } from "./wizard-copy";
+import type { CredentialField } from "./providers";
 
 type SelectOption<T> = {
   readonly label: string;
@@ -59,7 +59,6 @@ export type WizardDeps = {
   readonly options: WizardOptions;
   readonly prompts: ClackWizardPrompts;
   readonly authClient: WizardSigninAuthClient;
-  readonly fuzzy: typeof fuzzySelect;
   readonly openBrowser: (url: string) => Promise<boolean>;
 };
 
@@ -100,21 +99,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   });
 
   const provider = await selectProvider(deps);
-  const rawProviderKey = provider.custom
+  const providerCredentials = provider.custom
     ? undefined
-    : unwrap(
-        prompts,
-        await prompts.password({
-          message: PROVIDER_KEY_QUESTION(provider.label),
-        }),
-      );
-  const providerKey =
-    rawProviderKey !== undefined && rawProviderKey.length > 0
-      ? rawProviderKey
-      : undefined;
-  if (rawProviderKey !== undefined && providerKey === undefined) {
-    prompts.log.warn("No provider API key entered; skipping instrumentation.");
-  }
+    : await collectCredentials(prompts, provider);
 
   const gitRoot = findGitRoot(deps.cwd);
   if (gitRoot) {
@@ -147,6 +134,32 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   };
 }
 
+async function collectCredentials(
+  prompts: ClackWizardPrompts,
+  provider: LlmProvider,
+): Promise<Record<string, string> | undefined> {
+  const fields: readonly CredentialField[] = provider.credentials ?? [
+    { envVar: provider.envVar!, label: provider.label, secret: true },
+  ];
+  const result: Record<string, string> = {};
+  for (const field of fields) {
+    const raw = unwrap(
+      prompts,
+      field.secret !== false
+        ? await prompts.password({ message: PROVIDER_KEY_QUESTION(field.label) })
+        : await prompts.text({ message: PROVIDER_KEY_QUESTION(field.label) }),
+    );
+    if (raw.length > 0) {
+      result[field.envVar] = raw;
+    }
+  }
+  if (Object.keys(result).length === 0) {
+    prompts.log.warn("No credentials entered; skipping instrumentation.");
+    return undefined;
+  }
+  return result;
+}
+
 async function selectProvider(deps: WizardDeps): Promise<LlmProvider> {
   const { prompts } = deps;
   const value = unwrap(
@@ -176,7 +189,6 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
     options: args.options,
     prompts: args.prompts,
     authClient,
-    fuzzy: fuzzySelect,
     openBrowser,
   };
 }
