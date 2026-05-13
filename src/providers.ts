@@ -19,15 +19,24 @@ export type CredentialField = {
   readonly secret?: boolean;
 };
 
-export type LlmProvider = {
-  readonly id: string;
-  readonly label: string;
-  /** Single-key providers: the env var for the API key. */
-  readonly envVar?: string;
-  /** Multi-credential providers: one entry per env var to collect. */
-  readonly credentials?: readonly CredentialField[];
-  readonly custom?: boolean;
-};
+type LlmProviderBase = { readonly id: string; readonly label: string };
+
+export type LlmProvider =
+  | (LlmProviderBase & {
+      readonly envVar: string;
+      readonly credentials?: never;
+      readonly custom?: never;
+    })
+  | (LlmProviderBase & {
+      readonly credentials: readonly CredentialField[];
+      readonly envVar?: never;
+      readonly custom?: never;
+    })
+  | (LlmProviderBase & {
+      readonly custom: true;
+      readonly envVar?: never;
+      readonly credentials?: never;
+    });
 
 export const LLM_PROVIDERS: readonly LlmProvider[] = [
   { id: "openai", label: "OpenAI", envVar: "OPENAI_API_KEY" },
@@ -65,6 +74,7 @@ export const LLM_PROVIDERS: readonly LlmProvider[] = [
       {
         envVar: "GOOGLE_APPLICATION_CREDENTIALS",
         label: "Path to service account JSON",
+        secret: false,
       },
     ],
   },
