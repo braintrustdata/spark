@@ -146,8 +146,7 @@ export async function runHarness(args: {
   readonly cwd: string;
   readonly braintrustApiKey: string;
   readonly resultFilePath: string;
-  readonly providerEnvVar?: string;
-  readonly providerApiKey?: string;
+  readonly providerCredentials?: Readonly<Record<string, string>>;
   readonly languages?: readonly DetectedLanguage[];
 }): Promise<RunHarnessResult> {
   const resolved = resolveHarnessPath();
@@ -166,9 +165,7 @@ export async function runHarness(args: {
         BRAINTRUST_API_KEY: args.braintrustApiKey,
         BT_WIZARD_RESULT_FILE: args.resultFilePath,
         BT_WIZARD_LANGUAGES: (args.languages ?? []).join(","),
-        ...(args.providerEnvVar && args.providerApiKey
-          ? { [args.providerEnvVar]: args.providerApiKey }
-          : {}),
+        ...args.providerCredentials,
       },
       stdio: "inherit",
     });
