@@ -3,11 +3,7 @@ import * as prompts from "@clack/prompts";
 import { runClackWizard, WizardCancelledError } from "./clack-wizard";
 import { parseArgs } from "./options";
 
-const { help } = await parseArgs(process.argv.slice(2), process.env);
-
-if (help) {
-  process.exit(0);
-}
+await parseArgs(process.argv.slice(2), process.env);
 
 try {
   await runClackWizard(prompts);

@@ -6,11 +6,6 @@ export type WizardOptions = {
   readonly caCertPath: string | undefined;
 };
 
-export type ParsedArgs = {
-  readonly options: WizardOptions;
-  readonly help: boolean;
-};
-
 const DEFAULT_API_URL = "https://api.braintrust.dev";
 const DEFAULT_APP_URL = "https://www.braintrust.dev";
 
@@ -50,19 +45,14 @@ export async function helpText(
 export async function parseArgs(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
-): Promise<ParsedArgs> {
+): Promise<WizardOptions> {
   const parser = buildParser(env);
   const parsed = await parser.parseAsync([...argv]);
 
-  const help = argv.includes("--help") || argv.includes("-h");
-
   return {
-    help,
-    options: {
-      apiUrl: stripTrailingSlash(parsed["api-url"] as string),
-      appUrl: stripTrailingSlash(parsed["app-url"] as string),
-      caCertPath: (parsed["ca-cert"] as string | undefined) || undefined,
-    },
+    apiUrl: stripTrailingSlash(parsed["api-url"] as string),
+    appUrl: stripTrailingSlash(parsed["app-url"] as string),
+    caCertPath: (parsed["ca-cert"] as string | undefined) || undefined,
   };
 }
 
