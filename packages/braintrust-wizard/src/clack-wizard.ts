@@ -87,7 +87,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   const { prompts } = deps;
   prompts.intro(WIZARD_TITLE);
 
-  if (!await isGitRepo(deps.cwd)) {
+  if (!(await isGitRepo(deps.cwd))) {
     prompts.log.warn(NOT_GIT_REPO_WARNING);
   }
 
@@ -123,7 +123,6 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     buildCleanupMessage({
       docsUrl: DOCS_URL,
       tracePermalink: undefined,
-      resumeCommand: undefined,
     }),
   );
 

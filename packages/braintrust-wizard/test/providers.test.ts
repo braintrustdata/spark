@@ -51,7 +51,7 @@ describe("LLM_PROVIDERS sync with @braintrust/proxy/schema", () => {
       if (provider.custom) continue;
       if (KNOWN_AHEAD.has(provider.id)) continue;
       if (MULTI_CREDENTIAL.has(provider.id)) continue;
-      expect(envVars.has(provider.envVar)).toBe(true);
+      expect(envVars.has(provider.envVar!)).toBe(true);
     }
   });
 

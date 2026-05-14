@@ -4,15 +4,7 @@
   "private": true,
   "description": "Restricted pi-coding-agent harness for the bt-wizard CLI: write/edit/grep + web search + bt only.",
   "type": "module",
-  "bin": {
-    "bt-wizard-harness": "./bin/bt-wizard-harness.mjs"
-  },
-  "files": [
-    "bin",
-    "extensions"
-  ],
   "scripts": {
-    "typings": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
@@ -21,7 +13,7 @@
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*",
     "node-pty": "^1.1.0",
-    "typebox": "^1.1.24"
+    "@sinclair/typebox": "^0.34.49"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
