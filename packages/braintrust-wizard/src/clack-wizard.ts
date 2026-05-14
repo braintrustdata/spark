@@ -99,9 +99,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   });
 
   const provider = await selectProvider(deps);
-  const providerCredentials = provider.custom
-    ? undefined
-    : await collectCredentials(prompts, provider);
+  if (!provider.custom) {
+    await collectCredentials(prompts, provider);
+  }
 
   const gitRoot = findGitRoot(deps.cwd);
   if (gitRoot) {
@@ -146,7 +146,9 @@ async function collectCredentials(
     const raw = unwrap(
       prompts,
       field.secret !== false
-        ? await prompts.password({ message: PROVIDER_KEY_QUESTION(field.label) })
+        ? await prompts.password({
+            message: PROVIDER_KEY_QUESTION(field.label),
+          })
         : await prompts.text({ message: PROVIDER_KEY_QUESTION(field.label) }),
     );
     if (raw.length > 0) {
