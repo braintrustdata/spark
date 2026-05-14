@@ -7,9 +7,9 @@ import {
   runClackWizard,
   WizardCancelledError,
 } from "./clack-wizard";
-import { helpText, parseArgs } from "./options";
+import { parseArgs } from "./options";
 
-const parsed = await parseArgs(process.argv.slice(2), process.env);
+const options = await parseArgs(process.argv.slice(2), process.env);
 
 // `NODE_EXTRA_CA_CERTS` is read once at Node startup, so we can't apply it
 // in-process. If --ca-cert (or BRAINTRUST_CA_CERT / SSL_CERT_FILE) was set
@@ -17,15 +17,15 @@ const parsed = await parseArgs(process.argv.slice(2), process.env);
 // applied. The guard env var prevents an infinite re-exec loop.
 const REEXEC_GUARD = "BT_WIZARD_REEXECED_FOR_CA";
 if (
-  parsed.options.caCertPath &&
+  options.caCertPath &&
   process.env[REEXEC_GUARD] !== "1" &&
-  process.env["NODE_EXTRA_CA_CERTS"] !== parsed.options.caCertPath
+  process.env["NODE_EXTRA_CA_CERTS"] !== options.caCertPath
 ) {
   const result = spawnSync(process.execPath, process.argv.slice(1), {
     stdio: "inherit",
     env: {
       ...process.env,
-      NODE_EXTRA_CA_CERTS: parsed.options.caCertPath,
+      NODE_EXTRA_CA_CERTS: options.caCertPath,
       [REEXEC_GUARD]: "1",
     },
   });
@@ -33,7 +33,7 @@ if (
 }
 
 const deps = buildDefaultDeps({
-  options: parsed.options,
+  options,
   prompts: prompts as unknown as Parameters<
     typeof buildDefaultDeps
   >[0]["prompts"],
