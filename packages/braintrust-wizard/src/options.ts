@@ -36,12 +36,6 @@ function buildParser(env: NodeJS.ProcessEnv) {
     .strict();
 }
 
-export async function helpText(
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<string> {
-  return buildParser(env).getHelp();
-}
-
 export async function parseArgs(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
