@@ -28,13 +28,17 @@ function buildParser(env: NodeJS.ProcessEnv) {
       description: "Path to PEM CA bundle",
       default: env["BRAINTRUST_CA_CERT"] ?? env["SSL_CERT_FILE"],
     })
-    .epilog("Environment:\n  CRANK_ENABLE_TELEMETRY=false   Disable anonymous usage telemetry")
+    .epilog(
+      "Environment:\n  CRANK_ENABLE_TELEMETRY=false   Disable anonymous usage telemetry",
+    )
     .help()
     .alias("h", "help")
     .strict();
 }
 
-export async function helpText(env: NodeJS.ProcessEnv = process.env): Promise<string> {
+export async function helpText(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
   return buildParser(env).getHelp();
 }
 
