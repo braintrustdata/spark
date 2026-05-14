@@ -1,17 +1,11 @@
 import type { DetectedLanguage } from "./language-detect";
 
-/**
- * The bt-wizard agent prompt. Adapted from
- * /workspace/bt-main/skills/sdk-install/instrument-task.md, with the three
- * Three sections handled deterministically by the wizard are omitted:
- *   - "Verify API Key (Install Precondition)"
- *   - "Verify in Braintrust (CRITICAL)"
- *   - "Post-Success Verification and Next Steps"
- *
- * Placeholders are filled in by `renderPrompt` using the detected language.
- * `{SDK_INSTALL_DIR}` resolves to the public docs URL for the language
- * (the harness fetches install guides via the `curl` tool, since bash/python
- * aren't available).
+/*
+ * spark agent prompt
+ * Adapt the link to the docs given depending on the language to instrument
+ * Instructs the agent to say INSTRUMENTATION_(IN)COMPLETE after it has completed the task.
+ * The harness catches these words and close the agent.
+ * This is non deterministic but knowing instrumentation is done is non deterministic too, I didn't think of a better solution.
  */
 const TEMPLATE = `# Braintrust SDK Installation (Agent Instructions)
 
@@ -65,7 +59,7 @@ If you do not know how to run the app, ask the user and wait for the response be
 
 ---
 
-### 6. Final Summary
+### 5. Final Summary
 
 Summarize:
 
