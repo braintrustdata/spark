@@ -10,8 +10,8 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
     "node-pty": "^1.1.0",
     "@sinclair/typebox": "^0.34.49"
   },
