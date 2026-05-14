@@ -13,7 +13,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { resolve, isAbsolute } from "node:path";
+import { resolve, isAbsolute, basename } from "node:path";
 import { existsSync } from "node:fs";
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
@@ -63,7 +63,6 @@ export default function pathGuard(pi: ExtensionAPI) {
   const cwdAbs = resolve(cwd);
   const root = gitRoot(cwdAbs);
   const envBraintrust = root ? resolve(root, ".env.braintrust") : undefined;
-  const envFile = root ? resolve(root, ".env") : undefined;
   const resultFileRaw = process.env["BT_WIZARD_RESULT_FILE"];
   const resultFile =
     resultFileRaw && resultFileRaw.length > 0
@@ -73,11 +72,6 @@ export default function pathGuard(pi: ExtensionAPI) {
   const exceptions = [envBraintrust, resultFile].filter(
     (p): p is string => typeof p === "string",
   );
-  // Paths that must never be touched regardless of cwd.
-  const blockedPaths = [envFile].filter(
-    (p): p is string => typeof p === "string",
-  );
-
   // pi stores skills, extensions, and config under ~/.agents/
   const homeDir = process.env["HOME"] ?? process.env["USERPROFILE"] ?? "";
   const piDataDir = homeDir ? resolve(homeDir, ".agents") : undefined;
@@ -94,7 +88,7 @@ export default function pathGuard(pi: ExtensionAPI) {
     }
     const abs = isAbsolute(raw) ? resolve(raw) : resolve(cwdAbs, raw);
 
-    if (blockedPaths.includes(abs)) {
+    if (basename(abs) === ".env") {
       return {
         block: true,
         reason: `Accessing "${raw}" is not allowed; use .env.braintrust instead.`,
