@@ -6,8 +6,10 @@
  *
  * Runs pi inside a PTY so it gets a real terminal: correct window size,
  * ANSI colours, cursor control, and automatic resize on SIGWINCH.
- * We intercept the PTY output to scan for "summary" (case-insensitive);
- * when detected we kill pi and exit so the wizard can run its cleanup phase.
+ * We intercept the PTY output to scan for the INSTRUMENTATION_COMPLETE /
+ * INSTRUMENTATION_INCOMPLETE sentinels; when one is seen and the agent
+ * stops emitting output, we kill pi and exit so the wizard can run its
+ * cleanup phase.
  *
  * Tools loaded (--no-builtin-tools baseline):
  *   read,write,edit,grep,find,ls  built-in file ops

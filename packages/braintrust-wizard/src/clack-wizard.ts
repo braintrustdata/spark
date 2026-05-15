@@ -150,7 +150,7 @@ async function collectCredentials(
           })
         : await prompts.text({ message: PROVIDER_KEY_QUESTION(field.label) }),
     );
-    if (raw.length > 0) {
+    if (raw && raw.length > 0) {
       result[field.envVar] = raw;
     }
   }
