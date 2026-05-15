@@ -123,6 +123,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     buildCleanupMessage({
       docsUrl: DOCS_URL,
       tracePermalink: undefined,
+      resumeCommand: undefined,
     }),
   );
 
@@ -150,8 +151,9 @@ async function collectCredentials(
           })
         : await prompts.text({ message: PROVIDER_KEY_QUESTION(field.label) }),
     );
-    if (raw && raw.length > 0) {
-      result[field.envVar] = raw;
+    const value = raw ?? "";
+    if (value.length > 0) {
+      result[field.envVar] = value;
     }
   }
   if (Object.keys(result).length === 0) {

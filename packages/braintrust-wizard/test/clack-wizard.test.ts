@@ -185,4 +185,24 @@ describe("runClackWizard", () => {
     await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
     expect(events.some((e) => e.startsWith("warn:Heads up"))).toBe(true);
   });
+
+  it("treats empty password submissions as skipped credentials", async () => {
+    const anthropicProvider = {
+      id: "anthropic",
+      label: "Anthropic",
+      envVar: "ANTHROPIC_API_KEY",
+    };
+    const { prompts, events } = createPrompts({
+      selects: [anthropicProvider],
+      passwords: [""],
+    });
+    const deps = buildDeps({ prompts });
+
+    const result = await runClackWizard(deps);
+
+    expect(result.orgName).toBe("acme");
+    expect(events).toContain(
+      "warn:No credentials entered; skipping instrumentation.",
+    );
+  });
 });

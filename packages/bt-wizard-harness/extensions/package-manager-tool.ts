@@ -13,7 +13,7 @@
  *   pkg managers: conda, hatch, mamba, pdm, pip, pipenv, pipx, poetry, rye, uv
  *   formatters:   autopep8, black, isort, ruff, yapf
  *   linters:      flake8, mypy, pylint, pyright, ruff
- *   test:         coverage, nose2, pytest, tox, unittest
+ *   test:         coverage, nose2, nox, pytest, tox, unittest
  *
  * JavaScript / TypeScript
  *   pkg managers: bun, deno, ni, npm, pnpm, yarn
@@ -85,6 +85,7 @@ const LANGUAGE_TOOLS: Record<Language, readonly string[]> = {
     // test
     "coverage",
     "nose2",
+    "nox",
     "pytest",
     "tox",
     "unittest",
