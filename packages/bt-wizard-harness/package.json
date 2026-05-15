@@ -4,6 +4,9 @@
   "private": true,
   "description": "Restricted pi-coding-agent harness for the bt-wizard CLI: write/edit/grep + web search + bt only.",
   "type": "module",
+  "bin": {
+    "bt-wizard-harness": "./bin/bt-wizard-harness.mjs"
+  },
   "scripts": {
     "lint": "eslint .",
     "format": "prettier --write .",

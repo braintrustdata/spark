@@ -1,41 +1,22 @@
 import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir, platform } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import type { DetectedLanguage } from "./language-detect";
 
-const HARNESS_PACKAGE_BIN =
-  "@braintrust/bt-wizard-harness/bin/bt-wizard-harness.mjs";
-
-function resolveHarnessPath():
-  | { readonly ok: true; readonly path: string }
-  | { readonly ok: false; readonly reason: string } {
-  try {
-    const require = createRequire(import.meta.url);
-    return { ok: true, path: require.resolve(HARNESS_PACKAGE_BIN) };
-  } catch (err) {
-    return {
-      ok: false,
-      reason: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
+const HARNESS_BIN_PATH = fileURLToPath(
+  import.meta
+    .resolve("@braintrust/bt-wizard-harness/bin/bt-wizard-harness.mjs"),
+);
 
 /**
  * Build the shell command a user can copy-paste to re-run the harness against
- * a saved prompt file. Returns undefined if the harness binary cannot be
- * resolved.
+ * a saved prompt file.
  */
-export function buildHarnessCommand(
-  promptFilePath: string,
-): string | undefined {
-  const resolved = resolveHarnessPath();
-  if (!resolved.ok) {
-    return undefined;
-  }
-  return `node ${JSON.stringify(resolved.path)} --prompt-file ${JSON.stringify(promptFilePath)}`;
+export function buildHarnessCommand(promptFilePath: string): string {
+  return `node ${JSON.stringify(HARNESS_BIN_PATH)} --prompt-file ${JSON.stringify(promptFilePath)}`;
 }
 
 export type InstallBtResult =
@@ -108,18 +89,13 @@ export function writePromptToTemp(prompt: string): WritePromptToTempResult {
   return { path };
 }
 
-export type RunHarnessResult =
-  | {
-      readonly status: "completed";
-      readonly exitCode: number;
-      readonly signal: NodeJS.Signals | null;
-      readonly tracePermalink: string | undefined;
-      readonly promptFilePath: string;
-    }
-  | {
-      readonly status: "harness-not-found";
-      readonly checked: readonly string[];
-    };
+export type RunHarnessResult = {
+  readonly status: "completed";
+  readonly exitCode: number;
+  readonly signal: NodeJS.Signals | null;
+  readonly tracePermalink: string | undefined;
+  readonly promptFilePath: string;
+};
 
 /**
  * Allocate a fresh result-file path that the harness will write the trace
@@ -149,26 +125,26 @@ export async function runHarness(args: {
   readonly providerCredentials?: Readonly<Record<string, string>>;
   readonly languages?: readonly DetectedLanguage[];
 }): Promise<RunHarnessResult> {
-  const resolved = resolveHarnessPath();
-  if (!resolved.ok) {
-    return { status: "harness-not-found", checked: [resolved.reason] };
-  }
   const promptFile = writePromptToTemp(args.prompt).path;
   // Touch the result file so the agent knows the path is writable and so
   // a missing file vs. an empty file are distinguishable.
   writeFileSync(args.resultFilePath, "");
   return new Promise((resolve) => {
-    const child = spawn("node", [resolved.path, "--prompt-file", promptFile], {
-      cwd: args.cwd,
-      env: {
-        ...process.env,
-        BRAINTRUST_API_KEY: args.braintrustApiKey,
-        BT_WIZARD_RESULT_FILE: args.resultFilePath,
-        BT_WIZARD_LANGUAGES: (args.languages ?? []).join(","),
-        ...args.providerCredentials,
+    const child = spawn(
+      "node",
+      [HARNESS_BIN_PATH, "--prompt-file", promptFile],
+      {
+        cwd: args.cwd,
+        env: {
+          ...process.env,
+          BRAINTRUST_API_KEY: args.braintrustApiKey,
+          BT_WIZARD_RESULT_FILE: args.resultFilePath,
+          BT_WIZARD_LANGUAGES: (args.languages ?? []).join(","),
+          ...args.providerCredentials,
+        },
+        stdio: "inherit",
       },
-      stdio: "inherit",
-    });
+    );
     child.on("error", () =>
       resolve({
         status: "completed",
