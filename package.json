@@ -9,7 +9,7 @@
   "scripts": {
     "start": "pnpm --filter braintrust-wizard start",
     "build": "pnpm --filter braintrust-wizard build",
-    "build:sea": "pnpm build && rm -rf dist-sea dist-sea-build && mkdir -p dist-sea dist-sea-build && pnpm --filter @braintrust/bt-wizard-harness deploy --prod --legacy dist-sea-build/bt-wizard-harness && tar -czf dist-sea-build/harness.tgz -C dist-sea-build bt-wizard-harness && node --build-sea sea-config.json && mv crank dist-sea/crank && codesign --sign - dist-sea/crank",
+    "build:sea": "pnpm build && node scripts/build-sea.mjs",
     "start:beau": "pnpm --filter braintrust-wizard start:beau",
     "build:beau": "pnpm --filter braintrust-wizard build:beau",
     "typings": "pnpm -r run typings",
