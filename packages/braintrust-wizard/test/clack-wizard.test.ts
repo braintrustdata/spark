@@ -5,9 +5,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
-  type WizardSigninAuthClient,
-  type WizardSigninCompleteResult,
-  type WizardSigninEvents,
+  type WizardSessionAuthClient,
+  type WizardSessionCompleteResult,
+  type WizardSessionEvents,
 } from "../src/auth";
 import {
   type ClackWizardPrompts,
@@ -97,45 +97,34 @@ function createPrompts(inputs: FakePromptInputs) {
   return { prompts, events };
 }
 
-const DEFAULT_LOGIN_RESULT: WizardSigninCompleteResult = {
+const DEFAULT_LOGIN_RESULT: WizardSessionCompleteResult = {
   apiKey: "bt-secret-key",
-  orgInfo: {
-    id: "o1",
-    name: "acme",
-    api_url: "https://api.test",
-    proxy_url: null,
-    realtime_url: null,
-    is_universal_api: null,
-    git_metadata: null,
-  },
-  project: {
-    id: "p1",
-    name: "demo",
-    org_id: "o1",
-    description: null,
-  },
+  orgId: "o1",
+  orgName: "acme",
+  projectId: "p1",
+  projectName: "demo",
 };
 
 function buildDeps(args: {
   readonly prompts: ClackWizardPrompts;
-  readonly authClient?: WizardSigninAuthClient;
+  readonly authClient?: WizardSessionAuthClient;
   readonly cwd?: string;
 }): WizardDeps {
   const cwd = args.cwd ?? mkdtempSync(join(tmpdir(), "bt-wizard-test-"));
   const stubAuth =
     args.authClient ??
     ({
-      login: async (events: WizardSigninEvents) => {
+      login: async (events: WizardSessionEvents) => {
         events.onLoginUrl({
-          loginUrl: "https://app.test/app/cli-login/test-session",
+          loginUrl: "https://app.test/app/cli-login?session_token=test",
           expiresAt: "2099-01-01T00:00:00.000Z",
         });
         await events.onTryOpenBrowser(
-          "https://app.test/app/cli-login/test-session",
+          "https://app.test/app/cli-login?session_token=test",
         );
         return DEFAULT_LOGIN_RESULT;
       },
-    } as unknown as WizardSigninAuthClient);
+    } as unknown as WizardSessionAuthClient);
 
   return {
     cwd,
