@@ -4,19 +4,33 @@ import { WizardSigninAuthClient } from "./auth";
 import { openBrowser } from "./browser";
 import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
 import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
+import {
+  allocateResultFile,
+  buildHarnessCommand,
+  ensureBtOnPath,
+  runHarness,
+  writePromptToTemp,
+} from "./instrument";
+import { detectLanguages, type DetectedLanguage } from "./language-detect";
 import type { WizardOptions } from "./options";
-import { LLM_PROVIDERS, type LlmProvider } from "./providers";
+import { renderPrompt } from "./prompt";
+import {
+  LLM_PROVIDERS,
+  type LlmProvider,
+  type CredentialField,
+} from "./providers";
 import {
   DOCS_URL,
   NOT_GIT_REPO_WARNING,
   PROVIDER_KEY_QUESTION,
   PROVIDER_QUESTION,
+  RUN_HARNESS_QUESTION,
   WIZARD_CANCEL_MESSAGE,
   WIZARD_TITLE,
   gitignoreNote,
+  promptSavedNote,
   wizardLoginPrompt,
 } from "./wizard-copy";
-import type { CredentialField } from "./providers";
 
 type SelectOption<T> = {
   readonly label: string;
@@ -99,8 +113,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   });
 
   const provider = await selectProvider(deps);
+  let providerCredentials: Record<string, string> | undefined;
   if (!provider.custom) {
-    await collectCredentials(prompts, provider);
+    providerCredentials = await collectCredentials(prompts, provider);
   }
 
   const gitRoot = await findGitRoot(deps.cwd);
@@ -119,11 +134,47 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
   }
 
+  const canInstrument = !provider.custom && providerCredentials !== undefined;
+  const languages = detectLanguages(deps.cwd);
+
+  let tracePermalink: string | undefined;
+  let resumeCommand: string | undefined;
+  if (canInstrument) {
+    const runIt = unwrap(
+      prompts,
+      await prompts.confirm({
+        initialValue: true,
+        message: RUN_HARNESS_QUESTION,
+      }),
+    );
+    if (runIt) {
+      const result = await runInstrumentation(deps, {
+        org: session.orgInfo.name,
+        project: session.project.name,
+        apiKey: session.apiKey,
+        providerCredentials,
+        languages,
+      });
+      tracePermalink = result.tracePermalink;
+      resumeCommand = result.resumeCommand;
+    } else {
+      const { path } = writePromptToTemp(
+        renderPrompt({ languages, interactive: false }),
+      );
+      prompts.note(promptSavedNote(path), "Prompt saved");
+    }
+  } else {
+    const { path } = writePromptToTemp(
+      renderPrompt({ languages, interactive: false }),
+    );
+    prompts.note(promptSavedNote(path), "Prompt saved");
+  }
+
   prompts.outro(
     buildCleanupMessage({
       docsUrl: DOCS_URL,
-      tracePermalink: undefined,
-      resumeCommand: undefined,
+      tracePermalink,
+      resumeCommand,
     }),
   );
 
@@ -173,6 +224,68 @@ async function selectProvider(deps: WizardDeps): Promise<LlmProvider> {
     }),
   );
   return value;
+}
+
+type InstrumentationResult = {
+  readonly tracePermalink: string | undefined;
+  readonly resumeCommand: string | undefined;
+};
+
+async function runInstrumentation(
+  deps: WizardDeps,
+  args: {
+    readonly org: string;
+    readonly project: string;
+    readonly apiKey: string;
+    readonly providerCredentials?: Readonly<Record<string, string>>;
+    readonly languages: readonly DetectedLanguage[];
+  },
+): Promise<InstrumentationResult> {
+  const { prompts } = deps;
+  const installResult = await ensureBtOnPath();
+  switch (installResult.status) {
+    case "already-installed":
+      break;
+    case "installed":
+      prompts.log.success("Installed `bt`.");
+      break;
+    case "skipped":
+      prompts.log.warn(`Skipping \`bt\` install: ${installResult.reason}`);
+      break;
+    case "failed":
+      prompts.log.error(`Couldn't install \`bt\`: ${installResult.reason}`);
+      break;
+  }
+
+  const resultFilePath = allocateResultFile();
+  const promptText = renderPrompt({
+    languages: args.languages,
+    interactive: true,
+    resultFilePath,
+  });
+  const harnessResult = await runHarness({
+    prompt: promptText,
+    cwd: deps.cwd,
+    braintrustApiKey: args.apiKey,
+    resultFilePath,
+    providerCredentials: args.providerCredentials,
+    languages: args.languages,
+  });
+
+  if (harnessResult.status === "harness-not-found") {
+    const { path } = writePromptToTemp(promptText);
+    prompts.log.warn(
+      `Harness not found. Wrote prompt to ${path}; run a coding agent against it manually.`,
+    );
+    return { tracePermalink: undefined, resumeCommand: undefined };
+  }
+  if (harnessResult.exitCode !== 0) {
+    prompts.log.warn(`Harness exited with code ${harnessResult.exitCode}.`);
+  }
+  return {
+    tracePermalink: harnessResult.tracePermalink,
+    resumeCommand: buildHarnessCommand(harnessResult.promptFilePath),
+  };
 }
 
 export type DefaultDepsArgs = {
