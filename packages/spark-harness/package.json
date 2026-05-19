@@ -1,11 +1,11 @@
 {
-  "name": "@braintrust/bt-wizard-harness",
+  "name": "@braintrust/spark-harness",
   "version": "0.1.0",
   "private": true,
-  "description": "Restricted pi-coding-agent harness for the bt-wizard CLI: write/edit/grep + web search + bt only.",
+  "description": "Restricted pi-coding-agent harness for the spark CLI: write/edit/grep + web search + bt only.",
   "type": "module",
   "bin": {
-    "bt-wizard-harness": "./bin/bt-wizard-harness.mjs"
+    "spark-harness": "./bin/spark-harness.mjs"
   },
   "scripts": {
     "lint": "eslint .",

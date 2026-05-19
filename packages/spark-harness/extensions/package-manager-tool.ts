@@ -2,7 +2,7 @@
  * Package-manager / formatter / linter / test-runner extension.
  *
  * Exposes a `pkg` tool so the agent can run language tooling without needing
- * bash. The allowed tools are gated by the languages detected by bt-wizard,
+ * bash. The allowed tools are gated by the languages detected by spark,
  * passed in via the `BT_WIZARD_LANGUAGES` environment variable.
  *
  * If no languages are detected, all known tools are permitted.

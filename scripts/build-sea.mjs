@@ -22,9 +22,9 @@ const run = (cmd, args, opts = {}) => {
 };
 
 // `--build-sea` writes to the literal `output` field from sea-config.json
-// (always "crank"), even on Windows. We add `.exe` only at the final location.
-const sourceBinName = "crank";
-const destBinName = isWindows ? "crank.exe" : "crank";
+// (always "spark"), even on Windows. We add `.exe` only at the final location.
+const sourceBinName = "spark";
+const destBinName = isWindows ? "spark.exe" : "spark";
 
 rmSync("dist-sea", { recursive: true, force: true });
 rmSync("dist-sea-build", { recursive: true, force: true });
@@ -33,11 +33,11 @@ mkdirSync("dist-sea-build", { recursive: true });
 
 run("pnpm", [
   "--filter",
-  "@braintrust/bt-wizard-harness",
+  "@braintrust/spark-harness",
   "deploy",
   "--prod",
   "--legacy",
-  "dist-sea-build/bt-wizard-harness",
+  "dist-sea-build/spark-harness",
 ]);
 
 run("tar", [
@@ -45,7 +45,7 @@ run("tar", [
   "dist-sea-build/harness.tgz",
   "-C",
   "dist-sea-build",
-  "bt-wizard-harness",
+  "spark-harness",
 ]);
 
 run(process.execPath, ["--build-sea", "sea-config.json"]);

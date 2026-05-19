@@ -12,11 +12,11 @@ importers:
         specifier: 3.8.3
         version: 3.8.3
 
-  packages/braintrust-wizard:
+  packages/spark:
     dependencies:
-      '@braintrust/bt-wizard-harness':
+      '@braintrust/spark-harness':
         specifier: workspace:*
-        version: link:../bt-wizard-harness
+        version: link:../spark-harness
       '@clack/prompts':
         specifier: 1.3.0
         version: 1.3.0
@@ -97,7 +97,7 @@ importers:
         specifier: 4.1.5
         version: 4.1.5(@opentelemetry/api@1.9.1)(@types/node@24.12.2)(vite@8.0.10(@types/node@24.12.2)(esbuild@0.27.7)(jiti@2.7.0)(yaml@2.9.0))
 
-  packages/bt-wizard-harness:
+  packages/spark-harness:
     dependencies:
       '@earendil-works/pi-coding-agent':
         specifier: '*'
@@ -1072,6 +1072,7 @@ packages:
   '@smithy/core@3.24.1':
     resolution: {integrity: sha512-3mT7o4qQyUWttYnVK3A0Z/u3Xha3E81tXn32Tz6vjZiUXhBrkEivpw1hBYfh84iFF9CSzkBU9Y1DJ3Q6RQ231g==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to bug in browser bundling instructions https://github.com/smithy-lang/smithy-typescript/issues/2025
 
   '@smithy/credential-provider-imds@4.3.1':
     resolution: {integrity: sha512-0S/acwHnqX4WrjXzhdiDRxsG2s9SC0cpPIK9nZ1R6UOHd+j7uL28+4bHu22urbLk2TVw3fkp6na/+fkUt/pLNQ==}

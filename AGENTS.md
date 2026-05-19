@@ -1,8 +1,8 @@
-# braintrust-wizard Agent Guide
+# spark Agent Guide
 
 ## Project Overview
 
-`braintrust-wizard` is a TypeScript CLI/TUI for setting up Braintrust projects. The default wizard currently uses Clack for terminal prompts. The beau variant keeps the original fullscreen Ink + React implementation; it is actively being worked on and is intended to replace the Clack implementation in the future. The project also uses TanStack Query for backend communication, Vitest for tests, ESLint for linting, Prettier for formatting, pnpm for package management, mise for tool pinning, and Rolldown for the build pipeline.
+`spark` is a TypeScript CLI/TUI for setting up Braintrust projects. The default wizard currently uses Clack for terminal prompts. The beau variant keeps the original fullscreen Ink + React implementation; it is actively being worked on and is intended to replace the Clack implementation in the future. The project also uses TanStack Query for backend communication, Vitest for tests, ESLint for linting, Prettier for formatting, pnpm for package management, mise for tool pinning, and Rolldown for the build pipeline.
 
 The project is currently an early bootstrap. Both variants start by asking whether the user already has a Braintrust account, then ask whether the browser should be opened for login. Browser opening is not wired up yet.
 
@@ -36,17 +36,17 @@ Default implementation work should go into the Clack implementation. Do not work
 
 This is a pnpm workspace. All packages live under `packages/`.
 
-- `packages/braintrust-wizard/` — the main wizard CLI (Clack + beau variants).
-- `packages/bt-wizard-harness/` — the pi-coding-agent harness scaffold.
+- `packages/spark/` — the main wizard CLI (Clack + beau variants).
+- `packages/spark-harness/` — the pi-coding-agent harness scaffold.
 
 Root-level scripts (`pnpm build`, `pnpm lint`, etc.) delegate to the packages via `--filter` or `-r`.
 
 ## Implementation Notes
 
-- Wizard source files live under `packages/braintrust-wizard/src/`.
-- Wizard tests live under `packages/braintrust-wizard/test/`.
-- The default CLI entrypoint is `packages/braintrust-wizard/src/cli.ts`; Rolldown emits `packages/braintrust-wizard/dist/cli.js`.
-- The beau CLI entrypoint is `packages/braintrust-wizard/src/beau/cli.tsx`; Rolldown emits `packages/braintrust-wizard/dist/cli.beau.js`.
-- Shared wizard copy lives in `packages/braintrust-wizard/src/wizard-copy.ts`; keep both variants using it.
-- `packages/braintrust-wizard/src/query-client.ts` owns QueryClient creation and should remain the central place for query defaults.
+- Wizard source files live under `packages/spark/src/`.
+- Wizard tests live under `packages/spark/test/`.
+- The default CLI entrypoint is `packages/spark/src/cli.ts`; Rolldown emits `packages/spark/dist/cli.js`.
+- The beau CLI entrypoint is `packages/spark/src/beau/cli.tsx`; Rolldown emits `packages/spark/dist/cli.beau.js`.
+- Shared wizard copy lives in `packages/spark/src/wizard-copy.ts`; keep both variants using it.
+- `packages/spark/src/query-client.ts` owns QueryClient creation and should remain the central place for query defaults.
 - Do not add SEA packaging yet; the current build targets are JavaScript bundles.

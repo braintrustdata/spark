@@ -1,12 +1,12 @@
 {
-  "name": "braintrust-wizard",
+  "name": "spark",
   "version": "0.0.0",
   "private": true,
   "description": "CLI wizard to get your project set up with Braintrust",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "braintrust-wizard": "./dist/cli.js"
+    "spark": "./dist/cli.js"
   },
   "scripts": {
     "start": "pnpm build && node dist/cli.js",
@@ -20,7 +20,7 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@braintrust/bt-wizard-harness": "workspace:*",
+    "@braintrust/spark-harness": "workspace:*",
     "@clack/prompts": "1.3.0",
     "@inquirer/search": "4.1.8",
     "@tanstack/react-query": "5.100.9",

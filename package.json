@@ -1,5 +1,5 @@
 {
-  "name": "crank",
+  "name": "spark",
   "version": "0.0.0",
   "private": true,
   "description": "Braintrust wizard monorepo",
@@ -7,11 +7,11 @@
   "type": "module",
   "packageManager": "pnpm@10.33.3",
   "scripts": {
-    "start": "pnpm --filter braintrust-wizard start",
-    "build": "pnpm --filter braintrust-wizard build",
+    "start": "pnpm --filter spark start",
+    "build": "pnpm --filter spark build",
     "build:sea": "pnpm build && node scripts/build-sea.mjs",
-    "start:beau": "pnpm --filter braintrust-wizard start:beau",
-    "build:beau": "pnpm --filter braintrust-wizard build:beau",
+    "start:beau": "pnpm --filter spark start:beau",
+    "build:beau": "pnpm --filter spark build:beau",
     "typings": "pnpm -r run typings",
     "test": "pnpm -r run test",
     "lint": "pnpm -r run lint",

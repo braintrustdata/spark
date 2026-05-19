@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Thin launcher for the bt-wizard pi harness.
+ * Thin launcher for the spark pi harness.
  *
- * Usage: bt-wizard-harness --prompt-file <path> [extra pi args...]
+ * Usage: spark-harness --prompt-file <path> [extra pi args...]
  *
  * Runs pi inside a PTY so it gets a real terminal: correct window size,
  * ANSI colours, cursor control, and automatic resize on SIGWINCH.
@@ -43,7 +43,7 @@ for (let i = 0; i < argv.length; i += 1) {
     i += 1;
   } else if (a === "-h" || a === "--help") {
     process.stdout.write(
-      "Usage: bt-wizard-harness --prompt-file <path> [extra pi args...]\n",
+      "Usage: spark-harness --prompt-file <path> [extra pi args...]\n",
     );
     process.exit(0);
   } else {

@@ -8,7 +8,7 @@
  *     trace permalink), if set.
  *
  * Anything outside that scope is blocked with a clear reason. This is the
- * file-system half of the bt-wizard tool whitelist; bash/python are removed
+ * file-system half of the spark tool whitelist; bash/python are removed
  * by running pi with --no-builtin-tools and an explicit -t allowlist.
  */
 
@@ -112,7 +112,7 @@ export default function pathGuard(pi: ExtensionAPI) {
     }
     return {
       block: true,
-      reason: `Path "${raw}" is outside the bt-wizard scope (cwd subtree${
+      reason: `Path "${raw}" is outside the spark scope (cwd subtree${
         exceptions.length > 0 ? ` plus ${exceptions.join(", ")}` : ""
       }).`,
     };
@@ -124,7 +124,7 @@ export default function pathGuard(pi: ExtensionAPI) {
     }
     ctx.ui.setToolsExpanded(false);
     ctx.ui.notify(
-      `bt-wizard path-guard active: cwd=${cwdAbs}${
+      `spark path-guard active: cwd=${cwdAbs}${
         exceptions.length > 0 ? `, exception=${exceptions.join(", ")}` : ""
       }${existsSync(cwdAbs) ? "" : " (cwd missing!)"}`,
       "info",
