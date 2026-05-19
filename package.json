@@ -9,6 +9,7 @@
   "scripts": {
     "start": "pnpm --filter braintrust-wizard start",
     "build": "pnpm --filter braintrust-wizard build",
+    "build:sea": "pnpm build && node scripts/build-sea.mjs",
     "start:beau": "pnpm --filter braintrust-wizard start:beau",
     "build:beau": "pnpm --filter braintrust-wizard build:beau",
     "typings": "pnpm -r run typings",

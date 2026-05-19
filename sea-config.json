@@ -1,0 +1,9 @@
+{
+  "main": "packages/braintrust-wizard/dist/cli.mjs",
+  "output": "crank",
+  "mainFormat": "module",
+  "disableExperimentalSEAWarning": true,
+  "assets": {
+    "harness.tgz": "dist-sea-build/harness.tgz"
+  }
+}
