@@ -1,35 +1,19 @@
-export type WizardSigninCreateResponse = {
-  readonly id: string;
+export type WizardSessionCreateResponse = {
+  readonly session_token: string;
   readonly poll_token: string;
-  readonly login_path: string;
-  readonly login_url: string;
   readonly expires_at: string;
+  readonly login_path: string;
 };
 
-export type WizardSigninOrgInfo = {
-  readonly id: string;
-  readonly name: string;
-  readonly api_url?: string | null;
-  readonly proxy_url?: string | null;
-  readonly realtime_url?: string | null;
-  readonly is_universal_api?: boolean | null;
-  readonly git_metadata?: unknown;
-};
-
-export type WizardSigninProject = {
-  readonly id: string;
-  readonly name: string;
-  readonly org_id: string;
-  readonly description?: string | null;
-};
-
-export type WizardSigninCompleteResult = {
+export type WizardSessionCompleteResult = {
   readonly apiKey: string;
-  readonly orgInfo: WizardSigninOrgInfo;
-  readonly project: WizardSigninProject;
+  readonly orgId: string;
+  readonly orgName: string;
+  readonly projectId: string;
+  readonly projectName: string;
 };
 
-export type WizardSigninEvents = {
+export type WizardSessionEvents = {
   readonly onLoginUrl: (info: {
     readonly loginUrl: string;
     readonly expiresAt: string;
@@ -44,55 +28,40 @@ const POLL_HARD_TIMEOUT_MS = 3 * 60 * 1000;
 const CREATE_REQUEST_TIMEOUT_MS = 15_000;
 const POLL_REQUEST_TIMEOUT_MS = 30_000;
 
-/**
- * Browser-mediated wizard sign-in.
- *
- * Endpoints (added by the braintrust-wizard-login-flow PR):
- *   POST {appUrl}/api/cli/wizard-signin/create
- *   GET  {appUrl}/api/cli/wizard-signin/poll?id=...
- *     (Authorization: Bearer <poll_token>)
- *
- * The poll response is one of:
- *   { status: "pending", expires_at }
- *   { status: "expired" }
- *   { status: "claimed" }
- *   { status: "complete", api_key, org_info, project }
- */
-export class WizardSigninAuthClient {
-  constructor(
-    private readonly appUrl: string,
-    private readonly clientName: string = "crank",
-  ) {}
+export class WizardSessionAuthClient {
+  constructor(private readonly appUrl: string) {}
 
-  async createSession(): Promise<WizardSigninCreateResponse> {
-    const res = await fetch(`${this.appUrl}/api/cli/wizard-signin/create`, {
+  async createSession(): Promise<WizardSessionCreateResponse> {
+    const res = await fetch(`${this.appUrl}/api/cli/wizard-session/create`, {
       method: "POST",
       headers: {
-        "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ client_name: this.clientName }),
       signal: AbortSignal.timeout(CREATE_REQUEST_TIMEOUT_MS),
     });
     if (!res.ok) {
       throw new Error(
-        `Wizard sign-in create failed: ${res.status} ${await res.text()}`,
+        `Wizard session create failed: ${res.status} ${await res.text()}`,
       );
     }
-    return (await res.json()) as WizardSigninCreateResponse;
+    return (await res.json()) as WizardSessionCreateResponse;
+  }
+
+  buildLoginUrl(session: WizardSessionCreateResponse): string {
+    return new URL(session.login_path, this.appUrl).toString();
   }
 
   async pollSession(args: {
-    readonly id: string;
+    readonly sessionToken: string;
     readonly pollToken: string;
     readonly sleep?: (ms: number) => Promise<void>;
-  }): Promise<WizardSigninCompleteResult> {
+  }): Promise<WizardSessionCompleteResult> {
     const sleep = args.sleep ?? defaultSleep;
     let interval = POLL_INTERVAL_MS;
     const deadline = Date.now() + POLL_HARD_TIMEOUT_MS;
     while (Date.now() < deadline) {
       await sleep(interval);
-      const url = `${this.appUrl}/api/cli/wizard-signin/poll?id=${encodeURIComponent(args.id)}`;
+      const url = `${this.appUrl}/api/cli/wizard-session/poll?session_token=${encodeURIComponent(args.sessionToken)}`;
       const res = await fetch(url, {
         method: "GET",
         headers: {
@@ -115,7 +84,7 @@ export class WizardSigninAuthClient {
       >;
       if (!res.ok) {
         throw new Error(
-          `Wizard sign-in poll failed: ${res.status} ${JSON.stringify(json)}`,
+          `Wizard session poll failed: ${res.status} ${JSON.stringify(json)}`,
         );
       }
       const status = json["status"];
@@ -123,31 +92,34 @@ export class WizardSigninAuthClient {
         case "pending":
           continue;
         case "expired":
-          throw new Error("Wizard sign-in session expired before approval.");
+          throw new Error("Wizard session expired before approval.");
         case "claimed":
           throw new Error(
-            "Wizard sign-in session was already claimed by another client.",
+            "Wizard session was already claimed by another client.",
           );
         case "complete":
           return parseCompleteResponse(json);
         default:
           throw new Error(
-            `Unexpected wizard sign-in status: ${JSON.stringify(json)}`,
+            `Unexpected wizard session status: ${JSON.stringify(json)}`,
           );
       }
     }
-    throw new Error("Wizard sign-in session timed out.");
+    throw new Error("Wizard session timed out.");
   }
 
-  async login(events: WizardSigninEvents): Promise<WizardSigninCompleteResult> {
+  async login(
+    events: WizardSessionEvents,
+  ): Promise<WizardSessionCompleteResult> {
     const session = await this.createSession();
+    const loginUrl = this.buildLoginUrl(session);
     events.onLoginUrl({
-      loginUrl: session.login_url,
+      loginUrl,
       expiresAt: session.expires_at,
     });
-    await events.onTryOpenBrowser(session.login_url);
+    await events.onTryOpenBrowser(loginUrl);
     return this.pollSession({
-      id: session.id,
+      sessionToken: session.session_token,
       pollToken: session.poll_token,
     });
   }
@@ -155,70 +127,28 @@ export class WizardSigninAuthClient {
 
 function parseCompleteResponse(
   json: Record<string, unknown>,
-): WizardSigninCompleteResult {
+): WizardSessionCompleteResult {
   const apiKey = json["api_key"];
-  if (typeof apiKey !== "string" || apiKey.length === 0) {
-    throw new Error("Wizard sign-in completed without an api_key");
-  }
-  const orgInfo = parseOrgInfo(json["org_info"]);
-  const project = parseProject(json["project"]);
-  return { apiKey, orgInfo, project };
-}
-
-function parseOrgInfo(value: unknown): WizardSigninOrgInfo {
-  if (!isObject(value)) {
-    throw new Error("Wizard sign-in completed without org_info");
-  }
-  const id = value["id"];
-  const name = value["name"];
-  if (typeof id !== "string" || typeof name !== "string") {
-    throw new Error("Wizard sign-in org_info missing id/name");
-  }
-  return {
-    id,
-    name,
-    api_url: optionalString(value["api_url"]),
-    proxy_url: optionalString(value["proxy_url"]),
-    realtime_url: optionalString(value["realtime_url"]),
-    is_universal_api:
-      typeof value["is_universal_api"] === "boolean"
-        ? value["is_universal_api"]
-        : null,
-    git_metadata: value["git_metadata"],
-  };
-}
-
-function parseProject(value: unknown): WizardSigninProject {
-  if (!isObject(value)) {
-    throw new Error("Wizard sign-in completed without project");
-  }
-  const id = value["id"];
-  const name = value["name"];
-  const orgId = value["org_id"];
+  const orgId = json["org_id"];
+  const orgName = json["org_name"];
+  const projectId = json["project_id"];
+  const projectName = json["project_name"];
   if (
-    typeof id !== "string" ||
-    typeof name !== "string" ||
-    typeof orgId !== "string"
+    !isNonEmptyString(apiKey) ||
+    !isNonEmptyString(orgId) ||
+    !isNonEmptyString(orgName) ||
+    !isNonEmptyString(projectId) ||
+    !isNonEmptyString(projectName)
   ) {
-    throw new Error("Wizard sign-in project missing id/name/org_id");
+    throw new Error(
+      `Wizard session complete response missing required fields: ${JSON.stringify(json)}`,
+    );
   }
-  return {
-    id,
-    name,
-    org_id: orgId,
-    description: optionalString(value["description"]),
-  };
+  return { apiKey, orgId, orgName, projectId, projectName };
 }
 
-function optionalString(value: unknown): string | null {
-  if (typeof value === "string") {
-    return value;
-  }
-  return null;
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
 function defaultSleep(ms: number): Promise<void> {

@@ -1,6 +1,8 @@
 import { cwd as processCwd } from "node:process";
 
-import { WizardSigninAuthClient } from "./auth";
+import pc from "picocolors";
+
+import { WizardSessionAuthClient } from "./auth";
 import { openBrowser } from "./browser";
 import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
 import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
@@ -72,7 +74,7 @@ export type WizardDeps = {
   readonly env: NodeJS.ProcessEnv;
   readonly options: WizardOptions;
   readonly prompts: ClackWizardPrompts;
-  readonly authClient: WizardSigninAuthClient;
+  readonly authClient: WizardSessionAuthClient;
   readonly openBrowser: (url: string) => Promise<boolean>;
 };
 
@@ -112,6 +114,10 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     onTryOpenBrowser: (url) => deps.openBrowser(url),
   });
 
+  prompts.log.success(
+    `Browser setup complete.\n  org: ${pc.greenBright(session.orgName)}\n  project: ${pc.greenBright(session.projectName)}`,
+  );
+
   const provider = await selectProvider(deps);
   let providerCredentials: Record<string, string> | undefined;
   if (!provider.custom) {
@@ -149,8 +155,8 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
     if (runIt) {
       const result = await runInstrumentation(deps, {
-        org: session.orgInfo.name,
-        project: session.project.name,
+        org: session.orgName,
+        project: session.projectName,
         apiKey: session.apiKey,
         providerCredentials,
         languages,
@@ -179,8 +185,8 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   );
 
   return {
-    orgName: session.orgInfo.name,
-    projectName: session.project.name,
+    orgName: session.orgName,
+    projectName: session.projectName,
     braintrustApiKey: session.apiKey,
   };
 }
@@ -298,7 +304,7 @@ export type DefaultDepsArgs = {
 export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
   const cwd = args.cwd ?? processCwd();
   const env = args.env ?? process.env;
-  const authClient = new WizardSigninAuthClient(args.options.appUrl);
+  const authClient = new WizardSessionAuthClient(args.options.appUrl);
   return {
     cwd,
     env,
