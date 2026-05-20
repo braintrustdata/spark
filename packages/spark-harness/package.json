@@ -13,8 +13,8 @@
     "format:check": "prettier --check ."
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": "0.75.4",
+    "@earendil-works/pi-tui": "0.75.4",
     "node-pty": "1.2.0-beta.13",
     "@sinclair/typebox": "^0.34.49"
   },
