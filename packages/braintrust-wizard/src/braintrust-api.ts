@@ -89,6 +89,22 @@ export class BraintrustApiClient {
     return { id, existed: headers.get("x-bt-found-existing") === "true" };
   }
 
+  async getProject(id: string): Promise<Project> {
+    const { data } = await this.request<Project>(
+      "GET",
+      `/v1/project/${encodeURIComponent(id)}`,
+    );
+    return data;
+  }
+
+  async getOrg(id: string): Promise<Org> {
+    const { data } = await this.request<Org>(
+      "GET",
+      `/v1/organization/${encodeURIComponent(id)}`,
+    );
+    return data;
+  }
+
   async listProjects(orgId: string): Promise<readonly Project[]> {
     const { data } = await this.request<{ objects: Project[] }>(
       "GET",

@@ -2,7 +2,11 @@ import { cwd as processCwd } from "node:process";
 
 import pc from "picocolors";
 
-import { WizardSessionAuthClient } from "./auth";
+import {
+  WizardSessionAuthClient,
+  type WizardSessionCompleteResult,
+} from "./auth";
+import { BraintrustApiClient } from "./braintrust-api";
 import { openBrowser } from "./browser";
 import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
 import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
@@ -107,12 +111,19 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     prompts.log.warn(NOT_GIT_REPO_WARNING);
   }
 
-  const session = await deps.authClient.login({
-    onLoginUrl: ({ loginUrl }) => {
-      prompts.note(wizardLoginPrompt({ loginUrl }), "Login");
-    },
-    onTryOpenBrowser: (url) => deps.openBrowser(url),
-  });
+  const session =
+    deps.options.apiKey !== undefined && deps.options.projectId !== undefined
+      ? await loginWithCiCredentials({
+          apiKey: deps.options.apiKey,
+          projectId: deps.options.projectId,
+          apiUrl: deps.options.apiUrl,
+        })
+      : await deps.authClient.login({
+          onLoginUrl: ({ loginUrl }) => {
+            prompts.note(wizardLoginPrompt({ loginUrl }), "Login");
+          },
+          onTryOpenBrowser: (url) => deps.openBrowser(url),
+        });
 
   prompts.log.success(
     `Browser setup complete.\n  org: ${pc.greenBright(session.orgName)}\n  project: ${pc.greenBright(session.projectName)}`,
@@ -121,7 +132,15 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   const provider = await selectProvider(deps);
   let providerCredentials: Record<string, string> | undefined;
   if (!provider.custom) {
-    providerCredentials = await collectCredentials(prompts, provider);
+    if (
+      deps.options.providerApiKey !== undefined &&
+      provider.envVar !== undefined &&
+      deps.options.provider?.id === provider.id
+    ) {
+      providerCredentials = { [provider.envVar]: deps.options.providerApiKey };
+    } else {
+      providerCredentials = await collectCredentials(prompts, provider);
+    }
   }
 
   const gitRoot = await findGitRoot(deps.cwd);
@@ -146,13 +165,15 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   let tracePermalink: string | undefined;
   let resumeCommand: string | undefined;
   if (canInstrument) {
-    const runIt = unwrap(
-      prompts,
-      await prompts.confirm({
-        initialValue: true,
-        message: RUN_HARNESS_QUESTION,
-      }),
-    );
+    const runIt = deps.options.instrument
+      ? true
+      : unwrap(
+          prompts,
+          await prompts.confirm({
+            initialValue: true,
+            message: RUN_HARNESS_QUESTION,
+          }),
+        );
     if (runIt) {
       const result = await runInstrumentation(deps, {
         org: session.orgName,
@@ -221,6 +242,9 @@ async function collectCredentials(
 }
 
 async function selectProvider(deps: WizardDeps): Promise<LlmProvider> {
+  if (deps.options.provider) {
+    return deps.options.provider;
+  }
   const { prompts } = deps;
   const value = unwrap(
     prompts,
@@ -266,7 +290,8 @@ async function runInstrumentation(
   const resultFilePath = allocateResultFile();
   const promptText = renderPrompt({
     languages: args.languages,
-    interactive: true,
+    interactive: !deps.options.yolo,
+    yolo: deps.options.yolo,
     resultFilePath,
   });
   const harnessResult = await runHarness({
@@ -300,6 +325,23 @@ export type DefaultDepsArgs = {
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
 };
+
+async function loginWithCiCredentials(args: {
+  readonly apiKey: string;
+  readonly projectId: string;
+  readonly apiUrl: string;
+}): Promise<WizardSessionCompleteResult> {
+  const api = new BraintrustApiClient(args.apiUrl, args.apiKey);
+  const project = await api.getProject(args.projectId);
+  const org = await api.getOrg(project.org_id);
+  return {
+    apiKey: args.apiKey,
+    orgId: org.id,
+    orgName: org.name,
+    projectId: project.id,
+    projectName: project.name,
+  };
+}
 
 export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
   const cwd = args.cwd ?? processCwd();

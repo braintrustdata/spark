@@ -115,6 +115,7 @@ In every other case, **stop and ask the user** before continuing. Do not guess, 
 export type RenderPromptOptions = {
   readonly languages: readonly DetectedLanguage[];
   readonly interactive: boolean;
+  readonly yolo?: boolean;
   /**
    * If set, a path the agent must write the trace permalink to (single line,
    * just the URL) right before exiting. The wizard reads this file after the
@@ -124,9 +125,17 @@ export type RenderPromptOptions = {
 };
 
 export function renderPrompt(opts: RenderPromptOptions): string {
-  const runMode = opts.interactive
-    ? "- **Interactive mode:** You can ask the user questions through the chat interface.\n"
-    : "- **Non-interactive mode:** You cannot ask the user questions. If a step requires user input (e.g., ambiguous language in a polyglot repo, unknown run command), abort with a clear explanation of what is needed.\n";
+  let runMode: string;
+  if (opts.yolo) {
+    runMode =
+      "- **Unattended mode (YOLO):** There is no user available to answer questions. Any instruction below that says to ask the user does not apply -- do not stop, do not wait, do not request input. Make the most reasonable choice from the evidence in the repo (pick the dominant language, use a conventional run command, etc.) and proceed. Only output `INSTRUMENTATION_INCOMPLETE` if instrumentation is genuinely impossible without input you cannot infer.\n";
+  } else if (opts.interactive) {
+    runMode =
+      "- **Interactive mode:** You can ask the user questions through the chat interface.\n";
+  } else {
+    runMode =
+      "- **Non-interactive mode:** You cannot ask the user questions. If a step requires user input (e.g., ambiguous language in a polyglot repo, unknown run command), abort with a clear explanation of what is needed.\n";
+  }
 
   let languageContext: string;
   let installSdkContext: string;
