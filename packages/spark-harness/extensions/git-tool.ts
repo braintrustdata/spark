@@ -203,7 +203,7 @@ export default function gitTool(pi: ExtensionAPI) {
           content: [
             {
               type: "text",
-              text: `error: git ${subcommand} is not permitted in the bt-wizard harness.`,
+              text: `error: git ${subcommand} is not permitted in the spark harness.`,
             },
           ],
           details: { blocked: true, subcommand },

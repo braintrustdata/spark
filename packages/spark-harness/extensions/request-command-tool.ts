@@ -145,7 +145,7 @@ export default function requestCommandTool(pi: ExtensionAPI) {
       }
 
       const approved = await ctx.ui.confirm(
-        "bt-wizard: command approval requested",
+        "spark: command approval requested",
         `Command: ${fullCommand}\nReason:  ${p.reason}`,
       );
 

@@ -174,7 +174,7 @@ export class BraintrustApiClient {
         }
         if (attempt === delays.length) {
           throw new Error(
-            "Your Braintrust account is still being provisioned. Please try `bt-wizard` again in a moment.",
+            "Your Braintrust account is still being provisioned. Please try `spark` again in a moment.",
             { cause: e },
           );
         }
@@ -213,7 +213,7 @@ export function buildApiKeyName(args: {
   readonly userHandle: string;
   readonly existingNames: readonly string[];
 }): string {
-  const base = `${args.userHandle}-created-by-bt-wizard`;
+  const base = `${args.userHandle}-created-by-spark`;
   for (let n = 0; n < 10000; n += 1) {
     const candidate = `${base}${n}`;
     if (!args.existingNames.includes(candidate)) {

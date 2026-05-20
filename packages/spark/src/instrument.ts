@@ -21,14 +21,9 @@ import type { DetectedLanguage } from "./language-detect";
 function extractHarnessFromAsset(): string {
   const asset = Buffer.from(getAsset("harness.tgz"));
   const hash = createHash("sha256").update(asset).digest("hex").slice(0, 16);
-  const cacheRoot = join(homedir(), ".cache", "crank");
+  const cacheRoot = join(homedir(), ".cache", "spark");
   const cacheDir = join(cacheRoot, hash);
-  const binPath = join(
-    cacheDir,
-    "bt-wizard-harness",
-    "bin",
-    "bt-wizard-harness.mjs",
-  );
+  const binPath = join(cacheDir, "spark-harness", "bin", "spark-harness.mjs");
   if (existsSync(binPath)) return binPath;
 
   mkdirSync(cacheRoot, { recursive: true });
@@ -63,8 +58,7 @@ export function resolveHarnessBinPath(): string {
     return extractHarnessFromAsset();
   }
   return fileURLToPath(
-    import.meta
-      .resolve("@braintrust/bt-wizard-harness/bin/bt-wizard-harness.mjs"),
+    import.meta.resolve("@braintrust/spark-harness/bin/spark-harness.mjs"),
   );
 }
 
@@ -82,7 +76,7 @@ export function resolveHarnessBootstrapPath(): string {
   const contents =
     "const { pathToFileURL } = require('node:url');\n" +
     "const { join, dirname } = require('node:path');\n" +
-    "const target = pathToFileURL(join(dirname(__filename), 'bt-wizard-harness.mjs')).href;\n" +
+    "const target = pathToFileURL(join(dirname(__filename), 'spark-harness.mjs')).href;\n" +
     "import(target).catch((err) => { console.error(err); process.exit(1); });\n";
   writeFileSync(bootstrapPath, contents);
   return bootstrapPath;
@@ -184,7 +178,7 @@ export type WritePromptToTempResult = {
 };
 
 export function writePromptToTemp(prompt: string): WritePromptToTempResult {
-  const dir = mkdtempSync(join(tmpdir(), "bt-wizard-"));
+  const dir = mkdtempSync(join(tmpdir(), "spark-"));
   const path = join(dir, "instrument-prompt.md");
   writeFileSync(path, prompt);
   return { path };
@@ -205,7 +199,7 @@ export type RunHarnessResult = {
  * `BT_WIZARD_RESULT_FILE` (path-guard whitelists it).
  */
 export function allocateResultFile(): string {
-  const dir = mkdtempSync(join(tmpdir(), "bt-wizard-"));
+  const dir = mkdtempSync(join(tmpdir(), "spark-"));
   return join(dir, "result.txt");
 }
 

@@ -30,10 +30,10 @@ export const PROVIDER_KEY_QUESTION = (label: string): string =>
   `Enter your ${label} API key:`;
 
 export const RUN_HARNESS_QUESTION =
-  "Run the bt-wizard coding agent harness now to instrument this repo?";
+  "Run the spark coding agent harness now to instrument this repo?";
 
 export const HARNESS_NOT_FOUND = (checked: readonly string[]): string =>
-  `Couldn't find the bt-wizard harness. Looked in:\n  ${checked.join("\n  ")}`;
+  `Couldn't find the spark harness. Looked in:\n  ${checked.join("\n  ")}`;
 
 export function gitignoreNote(args: {
   readonly added: boolean;

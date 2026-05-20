@@ -110,7 +110,7 @@ function buildDeps(args: {
   readonly authClient?: WizardSessionAuthClient;
   readonly cwd?: string;
 }): WizardDeps {
-  const cwd = args.cwd ?? mkdtempSync(join(tmpdir(), "bt-wizard-test-"));
+  const cwd = args.cwd ?? mkdtempSync(join(tmpdir(), "spark-test-"));
   const stubAuth =
     args.authClient ??
     ({
@@ -172,7 +172,7 @@ describe("runClackWizard", () => {
   });
 
   it("warns when not in a git repo", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "bt-wizard-nogit-"));
+    const dir = mkdtempSync(join(tmpdir(), "spark-nogit-"));
     mkdirSync(join(dir, "child"), { recursive: true });
     const { prompts, events } = createPrompts({ selects: [CANCEL] });
     const deps = buildDeps({ prompts, cwd: join(dir, "child") });

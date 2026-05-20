@@ -38,20 +38,20 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            artifact: crank-linux-x64
-            path: dist-sea/crank
+            artifact: spark-linux-x64
+            path: dist-sea/spark
           - os: ubuntu-24.04-arm
-            artifact: crank-linux-arm64
-            path: dist-sea/crank
+            artifact: spark-linux-arm64
+            path: dist-sea/spark
           - os: macos-26
-            artifact: crank-darwin-arm64
-            path: dist-sea/crank
+            artifact: spark-darwin-arm64
+            path: dist-sea/spark
           - os: macos-15-intel
-            artifact: crank-darwin-x64
-            path: dist-sea/crank
+            artifact: spark-darwin-x64
+            path: dist-sea/spark
           - os: windows-2022
-            artifact: crank-win-x64
-            path: dist-sea/crank.exe
+            artifact: spark-win-x64
+            path: dist-sea/spark.exe
     steps:
       - name: Checkout
         # actions/checkout@v6.0.2

@@ -19,7 +19,7 @@ const DEFAULT_APP_URL = "https://www.braintrust.dev";
 
 function buildParser(env: NodeJS.ProcessEnv) {
   return yargs([])
-    .scriptName("bt-wizard")
+    .scriptName("spark")
     .usage("$0 [options]")
     .option("api-url", {
       type: "string",
