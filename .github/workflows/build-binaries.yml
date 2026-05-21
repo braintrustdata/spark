@@ -31,11 +31,11 @@ jobs:
             ext: ""
             archive: tar.gz
           - os: windows-2022
-            artifact: spark-win-x64
+            artifact: spark-windows-x64
             ext: ".exe"
             archive: zip
           - os: windows-11-arm
-            artifact: spark-win-arm64
+            artifact: spark-windows-arm64
             ext: ".exe"
             archive: zip
     steps:
