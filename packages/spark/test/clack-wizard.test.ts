@@ -91,6 +91,7 @@ function createPrompts(inputs: FakePromptInputs) {
       info: (m) => events.push(`info:${m}`),
       error: (m) => events.push(`error:${m}`),
       success: (m) => events.push(`success:${m}`),
+      message: (m) => events.push(`message:${m}`),
     },
   };
 
@@ -118,6 +119,7 @@ function buildDeps(args: {
         events.onLoginUrl({
           loginUrl: "https://app.test/app/cli-login?session_token=test",
           expiresAt: "2099-01-01T00:00:00.000Z",
+          verificationCode: "123456",
         });
         await events.onTryOpenBrowser(
           "https://app.test/app/cli-login?session_token=test",

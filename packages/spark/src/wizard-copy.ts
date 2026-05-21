@@ -1,3 +1,5 @@
+import pc from "picocolors";
+
 export const WIZARD_TITLE = "Braintrust Setup";
 
 export const WIZARD_DESCRIPTION =
@@ -48,10 +50,21 @@ export function gitignoreNote(args: {
   return ".gitignore unchanged.";
 }
 
-export function wizardLoginPrompt(args: { readonly loginUrl: string }): string {
+export function wizardVerificationCodeMessage(code: string): string {
+  return `After signing in, verify this code matches the one shown in your browser: ${pc.reset(pc.bold(pc.whiteBright(code)))}`;
+}
+
+export function terminalHyperlink(url: string, label: string = url): string {
+  return `\x1b]8;;${url}\x07${label}\x1b]8;;\x07`;
+}
+
+export function wizardLoginPrompt(args: {
+  readonly verificationCode: string;
+}): string {
   return [
-    "Open this URL in your browser to finish signing in:",
-    `  ${args.loginUrl}`,
+    "Open the URL above in your browser to finish signing in.",
+    "",
+    wizardVerificationCodeMessage(args.verificationCode),
     "",
     "Pick the org and project you want to use; the wizard will resume here.",
   ].join("\n");

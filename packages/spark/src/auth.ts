@@ -3,6 +3,7 @@ export type WizardSessionCreateResponse = {
   readonly poll_token: string;
   readonly expires_at: string;
   readonly login_path: string;
+  readonly verification_code: string;
 };
 
 export type WizardSessionCompleteResult = {
@@ -17,6 +18,7 @@ export type WizardSessionEvents = {
   readonly onLoginUrl: (info: {
     readonly loginUrl: string;
     readonly expiresAt: string;
+    readonly verificationCode: string;
   }) => void;
   readonly onTryOpenBrowser: (url: string) => Promise<boolean>;
 };
@@ -116,6 +118,7 @@ export class WizardSessionAuthClient {
     events.onLoginUrl({
       loginUrl,
       expiresAt: session.expires_at,
+      verificationCode: session.verification_code,
     });
     await events.onTryOpenBrowser(loginUrl);
     return this.pollSession({

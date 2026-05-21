@@ -36,6 +36,7 @@ import {
   gitignoreNote,
   promptSavedNote,
   wizardLoginPrompt,
+  terminalHyperlink,
 } from "./wizard-copy";
 
 type SelectOption<T> = {
@@ -70,6 +71,7 @@ export type ClackWizardPrompts = {
     readonly info: (message: string) => void;
     readonly error: (message: string) => void;
     readonly success: (message: string) => void;
+    readonly message: (message: string) => void;
   };
 };
 
@@ -119,8 +121,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
           apiUrl: deps.options.apiUrl,
         })
       : await deps.authClient.login({
-          onLoginUrl: ({ loginUrl }) => {
-            prompts.note(wizardLoginPrompt({ loginUrl }), "Login");
+          onLoginUrl: ({ loginUrl, verificationCode }) => {
+            prompts.log.message(terminalHyperlink(loginUrl));
+            prompts.note(wizardLoginPrompt({ verificationCode }), "Login");
           },
           onTryOpenBrowser: (url) => deps.openBrowser(url),
         });
