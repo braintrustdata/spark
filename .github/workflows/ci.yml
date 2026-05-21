@@ -31,44 +31,8 @@ jobs:
         run: pnpm build:beau
 
   build-binary:
-    name: Build-binary (${{ matrix.artifact }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            artifact: spark-linux-x64
-            path: dist-sea/spark
-          - os: ubuntu-24.04-arm
-            artifact: spark-linux-arm64
-            path: dist-sea/spark
-          - os: macos-26
-            artifact: spark-darwin-arm64
-            path: dist-sea/spark
-          - os: macos-15-intel
-            artifact: spark-darwin-x64
-            path: dist-sea/spark
-          - os: windows-2022
-            artifact: spark-win-x64
-            path: dist-sea/spark.exe
-    steps:
-      - name: Checkout
-        # actions/checkout@v6.0.2
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-
-      - uses: ./.github/actions/setup
-
-      - name: Build SEA binary
-        run: pnpm build:sea
-
-      - name: Upload SEA binary
-        # actions/upload-artifact@v4.4.3
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
-        with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.path }}
-          if-no-files-found: error
+    name: Build binaries
+    uses: ./.github/workflows/build-binaries.yml
 
   test:
     name: Test
