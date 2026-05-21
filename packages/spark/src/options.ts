@@ -1,5 +1,6 @@
 import yargs from "yargs/yargs";
 
+import pkg from "../package.json" with { type: "json" };
 import { LLM_PROVIDERS, type LlmProvider } from "./providers";
 
 export type WizardOptions = {
@@ -38,6 +39,7 @@ function buildParser(env: NodeJS.ProcessEnv) {
     })
     .help()
     .alias("h", "help")
+    .version(pkg.version)
     .strict();
 }
 
