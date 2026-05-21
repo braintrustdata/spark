@@ -1,8 +1,9 @@
 {
   "name": "spark",
+  "//": "The following version is NOT spark's version. Spark version is tracked in packages/spark/package.json",
   "version": "0.0.0",
   "private": true,
-  "description": "Braintrust wizard monorepo",
+  "description": "CLI wizard to get your project set up with Braintrust",
   "license": "MIT",
   "type": "module",
   "packageManager": "pnpm@10.33.3",
