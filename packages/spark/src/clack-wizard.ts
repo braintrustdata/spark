@@ -1,3 +1,6 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { cwd as processCwd } from "node:process";
 
 import pc from "picocolors";
@@ -212,15 +215,81 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   };
 }
 
+// Pi stores per-provider credentials in `auth.json` and consults it BEFORE
+// env vars (see pi's auth-storage docs: priority is auth.json > env). If the
+// user already ran `/login` inside pi, prompting again and passing the new
+// key via env would be silently overridden. So: if pi already has creds for
+// the chosen provider, skip the prompt entirely.
+// Spark provider id → pi auth.json key. Only entries that differ from the
+// spark id need to be listed; everything else falls through to provider.id.
+const PI_AUTH_KEY_BY_PROVIDER_ID: Readonly<Record<string, string>> = {
+  gemini: "google",
+  bedrock: "amazon-bedrock",
+  azure: "azure-openai-responses",
+};
+
+function piAgentDir(): string {
+  const env = process.env.PI_CODING_AGENT_DIR;
+  if (env && env.length > 0) {
+    if (env === "~") return homedir();
+    if (env.startsWith("~/")) return homedir() + env.slice(1);
+    return env;
+  }
+  return join(homedir(), ".pi", "agent");
+}
+
+function piAuthHasProvider(
+  prompts: ClackWizardPrompts,
+  providerId: string,
+): boolean {
+  const piKey = PI_AUTH_KEY_BY_PROVIDER_ID[providerId] ?? providerId;
+  const authPath = join(piAgentDir(), "auth.json");
+  let raw: string;
+  try {
+    raw = readFileSync(authPath, "utf8");
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      prompts.log.warn(
+        `Could not read ${authPath}: ${(err as Error).message}. Will prompt for credentials.`,
+      );
+    }
+    return false;
+  }
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return Object.prototype.hasOwnProperty.call(parsed, piKey);
+  } catch (err) {
+    prompts.log.warn(
+      `Could not parse ${authPath} (${(err as Error).message}). Pi may override any key entered here; fix or remove the file before continuing.`,
+    );
+    return false;
+  }
+}
+
 async function collectCredentials(
   prompts: ClackWizardPrompts,
   provider: LlmProvider,
 ): Promise<Record<string, string> | undefined> {
+  if (piAuthHasProvider(prompts, provider.id)) {
+    prompts.log.info(
+      `Using ${provider.label} credentials already stored in pi's auth.json.`,
+    );
+    return {};
+  }
   const fields: readonly CredentialField[] = provider.credentials ?? [
     { envVar: provider.envVar!, label: provider.label, secret: true },
   ];
   const result: Record<string, string> = {};
+  let satisfiedFromEnv = false;
   for (const field of fields) {
+    const existing = process.env[field.envVar];
+    if (existing !== undefined && existing.length > 0) {
+      prompts.log.info(
+        `Using ${field.envVar} from environment for ${field.label}.`,
+      );
+      satisfiedFromEnv = true;
+      continue;
+    }
     const raw = unwrap(
       prompts,
       field.secret !== false
@@ -234,7 +303,7 @@ async function collectCredentials(
       result[field.envVar] = value;
     }
   }
-  if (Object.keys(result).length === 0) {
+  if (Object.keys(result).length === 0 && !satisfiedFromEnv) {
     prompts.log.warn("No credentials entered; skipping instrumentation.");
     return undefined;
   }
