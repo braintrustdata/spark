@@ -86,10 +86,18 @@ function resolvePiJs() {
 }
 
 const piJs = resolvePiJs();
-// spawn args: if we found the JS file, use `node <file>`; else fall back to
-// spawning the `pi` executable directly (works if installed globally as a
-// real binary rather than a pnpm shim).
-const [spawnBin, spawnArgs] = piJs ? [process.execPath, [piJs]] : ["pi", []];
+// Under a SEA parent, `process.execPath` is the spark binary, so we re-exec it
+// with the __pi sentinel instead of treating it as `node`. Outside a SEA we can
+// invoke node directly; if the pi shim wasn't found at all we fall back to a
+// global `pi` on PATH.
+function resolveSpawn() {
+  if (!piJs) return ["pi", []];
+  if (process.env.SPARK_SEA_REEXEC === "1") {
+    return [process.execPath, ["__pi", piJs]];
+  }
+  return [process.execPath, [piJs]];
+}
+const [spawnBin, spawnArgs] = resolveSpawn();
 
 const piArgs = [
   "--no-session",

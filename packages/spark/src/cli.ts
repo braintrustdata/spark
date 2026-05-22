@@ -10,8 +10,10 @@ import {
 } from "./clack-wizard";
 import {
   HARNESS_SENTINEL_ARG,
+  PI_SENTINEL_ARG,
   resolveHarnessBinPath,
   resolveHarnessBootstrapPath,
+  resolvePiBootstrapPath,
 } from "./instrument";
 import { parseArgs } from "./options";
 
@@ -24,6 +26,14 @@ if (process.argv[2] === HARNESS_SENTINEL_ARG) {
   const harnessBin = resolveHarnessBinPath();
   const bootstrap = resolveHarnessBootstrapPath();
   process.argv = [process.execPath, harnessBin, ...process.argv.slice(3)];
+  createRequire(bootstrap)(bootstrap);
+} else if (process.argv[2] === PI_SENTINEL_ARG) {
+  // The harness re-execs us with `__pi <piJs> [args]` so pi runs as if it were
+  // launched via `node <piJs>`. Bare `[execPath, piJs]` would just re-enter
+  // this wizard, since `execPath` is the spark SEA binary.
+  const piJs = process.argv[3];
+  const bootstrap = resolvePiBootstrapPath(piJs);
+  process.argv = [process.execPath, piJs, ...process.argv.slice(4)];
   createRequire(bootstrap)(bootstrap);
 } else {
   const options = await parseArgs(process.argv.slice(2), process.env);

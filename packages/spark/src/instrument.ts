@@ -88,6 +88,40 @@ export function resolveHarnessBootstrapPath(): string {
  */
 export const HARNESS_SENTINEL_ARG = "__harness";
 
+/**
+ * Sentinel argv that re-execs the SEA as `node <piJs> [args]`. The harness uses
+ * this when running inside a SEA, where `process.execPath` is the spark binary
+ * itself — invoking `[execPath, piJs]` directly would just re-run the wizard
+ * instead of pi.
+ */
+export const PI_SENTINEL_ARG = "__pi";
+
+/**
+ * Env var that signals to the harness that the parent process is a SEA, so it
+ * must launch pi via the {@link PI_SENTINEL_ARG} re-exec dance instead of
+ * `node <piJs>`.
+ */
+export const SEA_REEXEC_ENV = "SPARK_SEA_REEXEC";
+
+/**
+ * Drops a tiny CJS shim next to an extracted ESM/CJS file whose only job is to
+ * dynamic-`import()` it. Same trick as {@link resolveHarnessBootstrapPath}: the
+ * SEA injected main can only `import` built-ins, but a real on-disk CJS file
+ * loaded via `createRequire` can re-enter dynamic import normally.
+ */
+export function resolvePiBootstrapPath(piJs: string): string {
+  const bootstrapPath =
+    piJs.replace(/\.[cm]?js$/, "") + ".spark-pi.bootstrap.cjs";
+  if (existsSync(bootstrapPath)) return bootstrapPath;
+  const targetJson = JSON.stringify(piJs);
+  const contents =
+    "const { pathToFileURL } = require('node:url');\n" +
+    `const target = pathToFileURL(${targetJson}).href;\n` +
+    "import(target).catch((err) => { console.error(err); process.exit(1); });\n";
+  writeFileSync(bootstrapPath, contents);
+  return bootstrapPath;
+}
+
 const HARNESS_BIN_PATH = resolveHarnessBinPath();
 
 type HarnessLauncher = {
@@ -236,6 +270,7 @@ export async function runHarness(args: {
           BRAINTRUST_API_KEY: args.braintrustApiKey,
           BT_WIZARD_RESULT_FILE: args.resultFilePath,
           BT_WIZARD_LANGUAGES: (args.languages ?? []).join(","),
+          ...(isSea() ? { [SEA_REEXEC_ENV]: "1" } : {}),
           ...args.providerCredentials,
         },
         stdio: "inherit",
