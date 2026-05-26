@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -20,9 +20,15 @@ import {
 
 const WIZARD_INTRO_TITLE = "Welcome to the Braintrust setup wizard";
 const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
+const INSTRUMENTATION_MODE_MESSAGE =
+  "How do you want to add Braintrust instrumentation?";
 const TOOL_SELECT_MESSAGE = "Which coding agent should Braintrust Setup use?";
+const OWN_AGENT_DELIVERY_MESSAGE =
+  "How should Braintrust Setup deliver the instrumentation prompt?";
 const PRODUCTION_TOKEN_MESSAGE =
   "Have you added BRAINTRUST_API_KEY to your deployment platform?";
+const ENV_BRAINTRUST_NOTICE =
+  "The wizard will now create a .env.braintrust file that is used to authenticate your application to Braintrust. It will be used for local testing.";
 
 const CANCEL = Symbol("cancel");
 
@@ -85,10 +91,26 @@ function createPrompts(inputs: FakePromptInputs) {
       if (next === "first") {
         return options.options[0]!.value as symbol;
       }
+      if (next === "built-in") {
+        return options.options.find(
+          (option) => option.label === "Use built-in coding agent",
+        )!.value as symbol;
+      }
+      if (next === "own-agent") {
+        return options.options.find(
+          (option) => option.label === "Use own coding agent",
+        )!.value as symbol;
+      }
       if (next === "manual") {
         return options.options.find(
-          (option) => option.label === "Manually instrument",
+          (option) => option.label === "Set up manually",
         )!.value as symbol;
+      }
+      if (next === "clipboard") {
+        return "clipboard" as unknown as symbol;
+      }
+      if (next === "terminal") {
+        return "terminal" as unknown as symbol;
       }
       if (next === "production-done") {
         return "done" as unknown as symbol;
@@ -158,6 +180,7 @@ function buildDeps(args: {
   readonly cwd?: string;
   readonly codingTools?: CodingToolRuntime;
   readonly tool?: "claude" | "codex";
+  readonly writeClipboard?: (text: string) => Promise<void>;
 }): WizardDeps {
   const cwd = args.cwd ?? createGitTempDir();
   const stubLogin =
@@ -189,6 +212,7 @@ function buildDeps(args: {
     prompts: args.prompts,
     loginWithWizardSession: stubLogin,
     openBrowser: async () => true,
+    writeClipboard: args.writeClipboard ?? (async () => {}),
     codingTools:
       args.codingTools ??
       ({
@@ -207,10 +231,11 @@ function buildDeps(args: {
           signal: null,
           finalText: "BRAINTRUST_SETUP_TOOL_OK",
         }),
-        run: async ({ env, onEvent }) => {
+        run: async ({ env, onEvent, prompt }) => {
           expect(env["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
           expect(env["BT_WIZARD_RESULT_FILE"]).toBeDefined();
           expect(env["BT_WIZARD_LANGUAGES"]).toBeUndefined();
+          expect(prompt).toContain("Unattended mode (YOLO)");
           onEvent({ type: "thinking", message: "Thinking..." });
           onEvent({
             type: "editing",
@@ -233,7 +258,7 @@ function buildDeps(args: {
 describe("runClackWizard", () => {
   it("walks through the happy path with one usable coding tool", async () => {
     const { prompts, events } = createPrompts({
-      selects: ["first", "production-done"],
+      selects: ["first", "first", "production-done"],
     });
     const deps = buildDeps({ prompts });
 
@@ -244,6 +269,8 @@ describe("runClackWizard", () => {
     expect(result.braintrustApiKey).toBe("bt-secret-key");
     expect(events[0]).toBe(`intro:${WIZARD_INTRO_TITLE}`);
     expect(events).toContain("note:Setup plan");
+    expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
+    expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
     expect(events.some((event) => event.startsWith("info:Sign in:"))).toBe(
       true,
     );
@@ -270,6 +297,10 @@ describe("runClackWizard", () => {
       "agent.event:editing:Edit:file_path: package.json",
     );
     expect(events).toContain("agent.success:Instrumentation complete.");
+    expect(readFileSync(join(deps.cwd, ".env.braintrust"), "utf8")).toBe(
+      "BRAINTRUST_API_KEY=bt-secret-key\n",
+    );
+    expectEnvNoticeBeforeWrite(events);
     expect(
       events.some((event) =>
         event.startsWith("info:Saved instrumentation prompt"),
@@ -281,7 +312,7 @@ describe("runClackWizard", () => {
   });
 
   it("cancels cleanly when the user aborts the tool select", async () => {
-    const { prompts, events } = createPrompts({ selects: [CANCEL] });
+    const { prompts, events } = createPrompts({ selects: ["first", CANCEL] });
     const deps = buildDeps({
       prompts,
       codingTools: {
@@ -319,7 +350,7 @@ describe("runClackWizard", () => {
     mkdirSync(join(dir, "child"), { recursive: true });
     const { prompts, events } = createPrompts({
       confirms: [true],
-      selects: ["first", "production-done"],
+      selects: ["first", "first", "production-done"],
     });
     const deps = buildDeps({ prompts, cwd: join(dir, "child") });
 
@@ -338,43 +369,17 @@ describe("runClackWizard", () => {
     expect(events).toContain(`cancel:${WIZARD_CANCEL_MESSAGE}`);
   });
 
-  it("supports manual instrumentation when no coding tool is usable", async () => {
+  it("supports manual instrumentation without creating local env files", async () => {
     const { prompts, events } = createPrompts({
       selects: ["manual", "production-later"],
       confirms: [true],
     });
-    const deps = buildDeps({
-      prompts,
-      codingTools: {
-        discover: async () => [
-          {
-            id: "claude",
-            label: "Claude Code",
-            command: "claude",
-            installed: false,
-            usable: false,
-            unavailableReason: "claude was not found on PATH.",
-          },
-          {
-            id: "codex",
-            label: "Codex",
-            command: "codex",
-            installed: true,
-            usable: false,
-            unavailableReason: "Codex is not logged in.",
-          },
-        ],
-        smokeTest: async () => {
-          throw new Error("should not smoke test");
-        },
-        run: async () => {
-          throw new Error("should not run");
-        },
-      },
-    });
+    const deps = buildDeps({ prompts });
 
     await runClackWizard(deps);
     expect(events).toContain("note:Manual instrumentation");
+    expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
+    expect(events).not.toContain(`select:${TOOL_SELECT_MESSAGE}`);
     expect(
       events.some((event) =>
         event.includes(
@@ -388,6 +393,87 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "warn:Do not forget to add BRAINTRUST_API_KEY to production. Braintrust tracing will not work in production without it.",
     );
+    expect(events).not.toContain(`note.message:${ENV_BRAINTRUST_NOTICE}`);
+    expect(existsSync(join(deps.cwd, ".env.braintrust"))).toBe(false);
+    expect(existsSync(join(deps.cwd, ".gitignore"))).toBe(false);
+  });
+
+  it("copies an interactive prompt for the user's own coding agent", async () => {
+    let clipboardText = "";
+    const { prompts, events } = createPrompts({
+      selects: ["own-agent", "clipboard", "production-done"],
+      confirms: [true],
+    });
+    const deps = buildDeps({
+      prompts,
+      writeClipboard: async (text) => {
+        clipboardText = text;
+      },
+    });
+
+    await runClackWizard(deps);
+    expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
+    expect(events).toContain(`select:${OWN_AGENT_DELIVERY_MESSAGE}`);
+    expect(events).toContain(
+      "success:Copied instrumentation prompt to clipboard.",
+    );
+    expect(events).toContain(
+      "confirm:Has your coding agent completed Braintrust instrumentation?",
+    );
+    expect(events).not.toContain("agent:Claude Code");
+    expect(clipboardText).toContain("Interactive mode");
+    expect(clipboardText).toContain("Project name to set in code: demo");
+    expect(clipboardText).toContain(".env.braintrust");
+    expect(clipboardText).not.toContain("This run is non-interactive");
+    expectEnvNoticeBeforeWrite(events);
+  });
+
+  it("prints an interactive prompt for the user's own coding agent", async () => {
+    const { prompts, events } = createPrompts({
+      selects: ["own-agent", "terminal", "production-done"],
+      confirms: [true],
+    });
+    const deps = buildDeps({ prompts });
+
+    await runClackWizard(deps);
+    expect(
+      events.some(
+        (event) =>
+          event.startsWith("message:Braintrust instrumentation prompt:") &&
+          event.includes("Interactive mode") &&
+          event.includes(
+            "https://www.braintrust.dev/docs/instrument/trace-llm-calls",
+          ),
+      ),
+    ).toBe(true);
+    expectEnvNoticeBeforeWrite(events);
+  });
+
+  it("prints the own-agent prompt when clipboard copy fails", async () => {
+    const { prompts, events } = createPrompts({
+      selects: ["own-agent", "clipboard", "production-done"],
+      confirms: [true],
+    });
+    const deps = buildDeps({
+      prompts,
+      writeClipboard: async () => {
+        throw new Error("clipboard unavailable");
+      },
+    });
+
+    await runClackWizard(deps);
+    expect(
+      events.some((event) =>
+        event.startsWith(
+          "warn:Could not copy the instrumentation prompt to the clipboard: clipboard unavailable",
+        ),
+      ),
+    ).toBe(true);
+    expect(
+      events.some((event) =>
+        event.startsWith("message:Braintrust instrumentation prompt:"),
+      ),
+    ).toBe(true);
   });
 
   it("uses a configured coding tool without prompting", async () => {
@@ -428,13 +514,15 @@ describe("runClackWizard", () => {
     });
 
     await runClackWizard(deps);
+    expect(events).not.toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
     expect(events).not.toContain(`select:${TOOL_SELECT_MESSAGE}`);
     expect(events).toContain(`select:${PRODUCTION_TOKEN_MESSAGE}`);
     expect(events).toContain("info:Using Codex for instrumentation.");
+    expectEnvNoticeBeforeWrite(events);
   });
 
   it("fails clearly when the selected tool smoke test fails", async () => {
-    const { prompts } = createPrompts({ selects: ["first"] });
+    const { prompts } = createPrompts({ selects: ["first", "first"] });
     const deps = buildDeps({
       prompts,
       codingTools: {
@@ -466,4 +554,13 @@ function createGitTempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "braintrust-setup-test-"));
   execFileSync("git", ["init", "--quiet"], { cwd: dir });
   return dir;
+}
+
+function expectEnvNoticeBeforeWrite(events: readonly string[]): void {
+  const noticeIndex = events.indexOf(`note.message:${ENV_BRAINTRUST_NOTICE}`);
+  const writeIndex = events.findIndex((event) =>
+    event.startsWith("success:Wrote "),
+  );
+  expect(noticeIndex).toBeGreaterThanOrEqual(0);
+  expect(writeIndex).toBeGreaterThan(noticeIndex);
 }
