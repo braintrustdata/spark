@@ -1,9 +1,6 @@
 {
   "main": "packages/spark/dist/cli.mjs",
-  "output": "spark",
+  "output": "braintrust-setup",
   "mainFormat": "module",
-  "disableExperimentalSEAWarning": true,
-  "assets": {
-    "harness.tgz": "dist-sea-build/harness.tgz"
-  }
+  "disableExperimentalSEAWarning": true
 }

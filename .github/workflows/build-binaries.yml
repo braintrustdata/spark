@@ -15,27 +15,27 @@ jobs:
       matrix:
         include:
           - os: ubuntu-24.04
-            artifact: spark-linux-x64
+            artifact: braintrust-setup-linux-x64
             ext: ""
             archive: tar.gz
           - os: ubuntu-24.04-arm
-            artifact: spark-linux-arm64
+            artifact: braintrust-setup-linux-arm64
             ext: ""
             archive: tar.gz
           - os: macos-26
-            artifact: spark-darwin-arm64
+            artifact: braintrust-setup-darwin-arm64
             ext: ""
             archive: tar.gz
           - os: macos-15-intel
-            artifact: spark-darwin-x64
+            artifact: braintrust-setup-darwin-x64
             ext: ""
             archive: tar.gz
           - os: windows-2022
-            artifact: spark-windows-x64
+            artifact: braintrust-setup-windows-x64
             ext: ".exe"
             archive: zip
           - os: windows-11-arm
-            artifact: spark-windows-arm64
+            artifact: braintrust-setup-windows-arm64
             ext: ".exe"
             archive: zip
     steps:
@@ -52,7 +52,7 @@ jobs:
         shell: bash
         working-directory: dist-sea
         run: |
-          bin="spark${{ matrix.ext }}"
+          bin="braintrust-setup${{ matrix.ext }}"
           out="${{ matrix.artifact }}.${{ matrix.archive }}"
           if [ "${{ matrix.archive }}" = "zip" ]; then
             7z a "$out" "$bin"

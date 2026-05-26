@@ -1,6 +1,10 @@
+import { execFile } from "node:child_process";
 import { access, readFile, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import ignore from "ignore";
+
+const execFileAsync = promisify(execFile);
 
 async function pathExists(p: string): Promise<boolean> {
   return access(p).then(
@@ -12,21 +16,30 @@ async function pathExists(p: string): Promise<boolean> {
 export async function findGitRoot(
   startDir: string,
 ): Promise<string | undefined> {
-  let dir = resolve(startDir);
-  while (true) {
-    if (await pathExists(join(dir, ".git"))) {
-      return dir;
-    }
-    const parent = dirname(dir);
-    if (parent === dir) {
-      return undefined;
-    }
-    dir = parent;
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "--show-toplevel"],
+      { cwd: startDir },
+    );
+    const root = stdout.trim();
+    return root.length > 0 ? root : undefined;
+  } catch {
+    return undefined;
   }
 }
 
 export async function isGitRepo(cwd: string): Promise<boolean> {
-  return (await findGitRoot(cwd)) !== undefined;
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["rev-parse", "--is-inside-work-tree"],
+      { cwd },
+    );
+    return stdout.trim() === "true";
+  } catch {
+    return false;
+  }
 }
 
 const ENV_FILENAME = ".env.braintrust";

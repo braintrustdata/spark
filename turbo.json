@@ -1,0 +1,38 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [
+    "package.json",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+    "prettier.config.mjs"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [
+        "dist/cli.mjs",
+        "dist/cli.mjs.map",
+        "dist/cli.beau.js",
+        "dist/cli.beau.js.map"
+      ]
+    },
+    "watch": {
+      "cache": false,
+      "persistent": true
+    },
+    "typings": {
+      "dependsOn": ["^typings"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^build"],
+      "outputs": []
+    },
+    "lint": {
+      "outputs": []
+    },
+    "format:check": {
+      "outputs": []
+    }
+  }
+}

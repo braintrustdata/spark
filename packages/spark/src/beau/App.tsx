@@ -11,12 +11,6 @@ import {
 } from "./brand-colors";
 import { SignalStrips } from "./SignalStrips";
 import { useTuiDispatch, useTuiState } from "./tui-state";
-import {
-  ACCOUNT_QUESTION,
-  LOGIN_BROWSER_PROMPT,
-  WIZARD_DESCRIPTION,
-  WIZARD_TITLE,
-} from "../wizard-copy";
 
 const MIN_TERMINAL_HEIGHT = 8;
 const MIN_TERMINAL_WIDTH = 48;
@@ -31,6 +25,12 @@ const SESSION_STRIP_BOTTOM_GAP = 4;
 const HEADER_CONTENT_HEIGHT = 9;
 const LAYOUT_TRANSITION_TICKS = 12;
 const LAYOUT_TRANSITION_TICK_MS = 45;
+const WIZARD_TITLE = "Braintrust Setup";
+const WIZARD_DESCRIPTION =
+  "Welcome to the Braintrust setup wizard. This wizard will guide you through setting up Braintrust in your project.";
+const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
+const LOGIN_BROWSER_PROMPT =
+  "For the rest of the flow, we require you to be logged in, do you want to open the browser?";
 
 type YesNoSelectorProps = {
   readonly color: string;

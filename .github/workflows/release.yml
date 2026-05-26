@@ -58,7 +58,7 @@ jobs:
       - name: Generate checksums
         shell: bash
         working-directory: release-assets
-        run: sha256sum spark-* > SHA256SUMS
+        run: sha256sum braintrust-setup-* > SHA256SUMS
 
       - name: Create GitHub Release
         env:
