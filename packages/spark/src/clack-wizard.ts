@@ -1,5 +1,6 @@
 import { cwd as processCwd } from "node:process";
 
+import clipboard from "clipboardy";
 import pc from "picocolors";
 
 import {
@@ -31,17 +32,44 @@ import { gitignoreNote, terminalHyperlink } from "./wizard-utils";
 const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
 const INSTRUMENTATION_DOCS_URL =
   "https://www.braintrust.dev/docs/instrument/trace-llm-calls";
+const ENV_BRAINTRUST_NOTICE =
+  "The wizard will now create a .env.braintrust file that is used to authenticate your application to Braintrust. It will be used for local testing.";
+
+type BuiltInInstrumentationChoice = {
+  readonly id: "built-in";
+  readonly label: "Use built-in coding agent";
+};
+
+type OwnAgentInstrumentationChoice = {
+  readonly id: "own-agent";
+  readonly label: "Use own coding agent";
+};
 
 type ManualInstrumentationChoice = {
   readonly id: "manual";
-  readonly label: "Manually instrument";
+  readonly label: "Set up manually";
 };
 
-type InstrumentationChoice = CodingToolStatus | ManualInstrumentationChoice;
+type InstrumentationModeChoice =
+  | BuiltInInstrumentationChoice
+  | OwnAgentInstrumentationChoice
+  | ManualInstrumentationChoice;
+
+type OwnAgentPromptDelivery = "clipboard" | "terminal";
+
+const BUILT_IN_INSTRUMENTATION_CHOICE: BuiltInInstrumentationChoice = {
+  id: "built-in",
+  label: "Use built-in coding agent",
+};
+
+const OWN_AGENT_INSTRUMENTATION_CHOICE: OwnAgentInstrumentationChoice = {
+  id: "own-agent",
+  label: "Use own coding agent",
+};
 
 const MANUAL_INSTRUMENTATION_CHOICE: ManualInstrumentationChoice = {
   id: "manual",
-  label: "Manually instrument",
+  label: "Set up manually",
 };
 
 type SelectOption<T> = {
@@ -96,6 +124,7 @@ export type WizardDeps = {
   readonly prompts: ClackWizardPrompts;
   readonly loginWithWizardSession: WizardSessionLogin;
   readonly openBrowser: (url: string) => Promise<boolean>;
+  readonly writeClipboard: (text: string) => Promise<void>;
   readonly codingTools: CodingToolRuntime;
 };
 
@@ -139,7 +168,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   const { prompts } = deps;
   prompts.intro("Welcome to the Braintrust setup wizard");
   prompts.note(
-    "You'll sign in with Braintrust, choose an org and project, save an API key for this repo, then run a coding tool to add instrumentation.",
+    "You'll sign in with Braintrust, choose an org and project, save an API key for local testing when needed, then choose how to add instrumentation.",
     "Setup plan",
   );
 
@@ -169,42 +198,34 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
         })
       : await loginWithBrowser(deps);
 
-  const instrumentation = await selectInstrumentationChoice(deps);
-  if (!isManualInstrumentationChoice(instrumentation)) {
+  const instrumentationMode = deps.options.tool
+    ? BUILT_IN_INSTRUMENTATION_CHOICE
+    : await selectInstrumentationMode(prompts);
+
+  let envFilePath: string | undefined;
+  if (instrumentationMode.id === "built-in") {
+    const instrumentation = await selectBuiltInCodingTool(deps);
     prompts.log.info(`Using ${instrumentation.label} for instrumentation.`);
     await deps.codingTools.smokeTest({
       id: instrumentation.id,
       cwd: deps.cwd,
     });
-  }
-
-  const gitRoot = await findGitRoot(deps.cwd);
-  let envFilePath: string | undefined;
-  if (gitRoot) {
-    const result = await writeEnvBraintrust(gitRoot, session.apiKey);
-    envFilePath = result.envFilePath;
-    prompts.log.success(`Wrote ${result.envFilePath}`);
-    prompts.log.info(
-      gitignoreNote({
-        added: result.addedToGitignore,
-        alreadyCovered: result.alreadyCovered,
-      }),
-    );
-  } else {
-    prompts.log.info(
-      `BRAINTRUST_API_KEY=${session.apiKey}\nNot in a git repo — set this in your environment manually.`,
-    );
-  }
-
-  if (isManualInstrumentationChoice(instrumentation)) {
-    await confirmManualInstrumentation(prompts);
-  } else {
+    envFilePath = await writeLocalEnvBraintrust(deps, session.apiKey);
     await runInstrumentation(deps, {
       org: session.orgName,
       project: session.projectName,
       apiKey: session.apiKey,
       toolId: instrumentation.id,
     });
+  } else if (instrumentationMode.id === "own-agent") {
+    envFilePath = await writeLocalEnvBraintrust(deps, session.apiKey);
+    await handleOwnAgentInstrumentation(deps, {
+      org: session.orgName,
+      project: session.projectName,
+      envFilePath,
+    });
+  } else {
+    await confirmManualInstrumentation(prompts);
   }
 
   const projectLogsUrl = `${deps.options.appUrl}/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
@@ -260,9 +281,37 @@ async function loginWithBrowser(
   }
 }
 
-async function selectInstrumentationChoice(
+async function selectInstrumentationMode(
+  prompts: ClackWizardPrompts,
+): Promise<InstrumentationModeChoice> {
+  return unwrap(
+    prompts,
+    await prompts.select<InstrumentationModeChoice>({
+      message: "How do you want to add Braintrust instrumentation?",
+      options: [
+        {
+          label: BUILT_IN_INSTRUMENTATION_CHOICE.label,
+          value: BUILT_IN_INSTRUMENTATION_CHOICE,
+          hint: "This wizard will launch a coding agent for you that will add instrumentation to your application (supports Claude Code and Codex). Careful: This will run the chosen tool in yolo mode (full permissions).",
+        },
+        {
+          label: OWN_AGENT_INSTRUMENTATION_CHOICE.label,
+          value: OWN_AGENT_INSTRUMENTATION_CHOICE,
+          hint: "You will receive a prompt to instrument your application with your own coding agent.",
+        },
+        {
+          label: MANUAL_INSTRUMENTATION_CHOICE.label,
+          value: MANUAL_INSTRUMENTATION_CHOICE,
+          hint: "Set up tracing for your application using instructions from the Braintrust docs.",
+        },
+      ],
+    }),
+  );
+}
+
+async function selectBuiltInCodingTool(
   deps: WizardDeps,
-): Promise<InstrumentationChoice> {
+): Promise<CodingToolStatus> {
   const { prompts } = deps;
   const statuses = await deps.codingTools.discover();
   if (deps.options.tool) {
@@ -278,7 +327,7 @@ async function selectInstrumentationChoice(
   }
 
   const usable = statuses.filter((status) => status.usable);
-  if (usable.length === 0 && statuses.length > 0) {
+  if (usable.length === 0) {
     prompts.log.warn(
       [
         "No usable coding agents found.",
@@ -288,11 +337,14 @@ async function selectInstrumentationChoice(
         ),
       ].join("\n"),
     );
+    throw new Error(
+      "No usable coding agents found. Use your own coding agent or the Braintrust docs instead.",
+    );
   }
 
   const value = unwrap(
     prompts,
-    await prompts.select<InstrumentationChoice>({
+    await prompts.select<CodingToolStatus>({
       message: "Which coding agent should Braintrust Setup use?",
       options: [
         ...usable.map((tool) => ({
@@ -300,21 +352,35 @@ async function selectInstrumentationChoice(
           value: tool,
           hint: tool.authMode ?? tool.version,
         })),
-        {
-          label: MANUAL_INSTRUMENTATION_CHOICE.label,
-          value: MANUAL_INSTRUMENTATION_CHOICE,
-          hint: "Use the docs yourself",
-        },
       ],
     }),
   );
   return value;
 }
 
-function isManualInstrumentationChoice(
-  choice: InstrumentationChoice,
-): choice is ManualInstrumentationChoice {
-  return choice.id === "manual";
+async function writeLocalEnvBraintrust(
+  deps: WizardDeps,
+  apiKey: string,
+): Promise<string | undefined> {
+  const { prompts } = deps;
+  const gitRoot = await findGitRoot(deps.cwd);
+  if (!gitRoot) {
+    prompts.log.info(
+      `BRAINTRUST_API_KEY=${apiKey}\nNot in a git repo — set this in your environment manually.`,
+    );
+    return undefined;
+  }
+
+  prompts.note(ENV_BRAINTRUST_NOTICE, "Local application token");
+  const result = await writeEnvBraintrust(gitRoot, apiKey);
+  prompts.log.success(`Wrote ${result.envFilePath}`);
+  prompts.log.info(
+    gitignoreNote({
+      added: result.addedToGitignore,
+      alreadyCovered: result.alreadyCovered,
+    }),
+  );
+  return result.envFilePath;
 }
 
 async function confirmManualInstrumentation(
@@ -339,6 +405,80 @@ async function confirmManualInstrumentation(
     prompts.cancel(WIZARD_CANCEL_MESSAGE);
     throw new WizardCancelledError();
   }
+}
+
+async function handleOwnAgentInstrumentation(
+  deps: WizardDeps,
+  args: {
+    readonly org: string;
+    readonly project: string;
+    readonly envFilePath: string | undefined;
+  },
+): Promise<void> {
+  const { prompts } = deps;
+  const promptText = `${renderPrompt({
+    interactive: true,
+    orgName: args.org,
+    projectName: args.project,
+  })}${renderOwnAgentEnvFileContext(args.envFilePath)}`;
+  const delivery = unwrap(
+    prompts,
+    await prompts.select<OwnAgentPromptDelivery>({
+      message:
+        "How should Braintrust Setup deliver the instrumentation prompt?",
+      options: [
+        {
+          label: "Copy to clipboard",
+          value: "clipboard",
+        },
+        {
+          label: "Print to terminal",
+          value: "terminal",
+        },
+      ],
+    }),
+  );
+
+  if (delivery === "clipboard") {
+    try {
+      await deps.writeClipboard(promptText);
+      prompts.log.success("Copied instrumentation prompt to clipboard.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      prompts.log.warn(
+        `Could not copy the instrumentation prompt to the clipboard: ${message}`,
+      );
+      printInstrumentationPrompt(prompts, promptText);
+    }
+  } else {
+    printInstrumentationPrompt(prompts, promptText);
+  }
+
+  const completed = unwrap(
+    prompts,
+    await prompts.confirm({
+      initialValue: false,
+      message: "Has your coding agent completed Braintrust instrumentation?",
+    }),
+  );
+  if (!completed) {
+    prompts.cancel(WIZARD_CANCEL_MESSAGE);
+    throw new WizardCancelledError();
+  }
+}
+
+function printInstrumentationPrompt(
+  prompts: ClackWizardPrompts,
+  promptText: string,
+): void {
+  prompts.log.message(
+    ["Braintrust instrumentation prompt:", "", promptText].join("\n"),
+  );
+}
+
+function renderOwnAgentEnvFileContext(envFilePath: string | undefined): string {
+  if (!envFilePath) return "";
+  return `\n## Local Braintrust API Key\n\nThe wizard created \`${envFilePath}\` with BRAINTRUST_API_KEY for local verification. Use it when running the application locally, but do not commit it.\n`;
 }
 
 async function confirmProductionApiKey(
@@ -391,7 +531,7 @@ async function runInstrumentation(
   const resultFilePath = allocateResultFile();
   const promptText = renderPrompt({
     interactive: false,
-    yolo: deps.options.yolo,
+    yolo: true,
     resultFilePath,
     orgName: args.org,
     projectName: args.project,
@@ -472,6 +612,7 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
     loginWithWizardSession: (events) =>
       loginWithWizardSessionRequest({ appUrl: args.options.appUrl, events }),
     openBrowser,
+    writeClipboard: (text) => clipboard.write(text),
     codingTools: {
       discover: discoverCodingTools,
       smokeTest: smokeTestCodingTool,

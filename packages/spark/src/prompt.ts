@@ -15,7 +15,7 @@ const TEMPLATE = `# Braintrust SDK Installation (Agent Instructions)
 {TARGET_CONTEXT}
 
 - **Only add Braintrust code.** Do not refactor or modify unrelated code.
-- **Do not ask the terminal user questions.** This run is non-interactive.
+{USER_INTERACTION_RULE}
 - **One app/service per install run.** Inspect the repository and choose the single clear target application. If there is no clear target, stop and report \`INSTRUMENTATION_INCOMPLETE\`.
 - **Install the latest Braintrust SDK.** Use the repository's package manager and the official Braintrust SDK docs. Do not hard-pin the Braintrust SDK version unless the user asks for it.
 - **Set the project name in code.** Do NOT configure project name via env vars.
@@ -107,15 +107,22 @@ export type RenderPromptOptions = {
 
 export function renderPrompt(opts: RenderPromptOptions): string {
   let runMode: string;
+  let userInteractionRule: string;
   if (opts.yolo) {
     runMode =
       "- **Unattended mode (YOLO):** There is no user available to answer questions. Do not stop, do not wait, and do not request input. Make the most reasonable choice from the evidence in the repo (pick the dominant language, use a conventional run command, etc.) and proceed. Only output `INSTRUMENTATION_INCOMPLETE` if instrumentation is genuinely impossible without input you cannot infer.\n";
+    userInteractionRule =
+      "- **Do not ask the terminal user questions.** This run is non-interactive.";
   } else if (opts.interactive) {
     runMode =
       "- **Interactive mode:** You can ask the user questions through the chat interface.\n";
+    userInteractionRule =
+      "- **Ask the user questions only when blocked.** Use the chat interface for any information you cannot infer from the repository.";
   } else {
     runMode =
       "- **Non-interactive mode:** You cannot ask the user questions. If a step requires user input (e.g., ambiguous language in a polyglot repo, unknown run command), stop with `INSTRUMENTATION_INCOMPLETE` and explain what is needed.\n";
+    userInteractionRule =
+      "- **Do not ask the terminal user questions.** This run is non-interactive.";
   }
 
   const targetContext =
@@ -141,6 +148,7 @@ Use the official Braintrust SDK docs at ${SDK_DOCS_URL} as the source of truth f
 
   return TEMPLATE.replace("{RUN_MODE_CONTEXT}", runMode)
     .replace("{TARGET_CONTEXT}", targetContext)
+    .replace("{USER_INTERACTION_RULE}", userInteractionRule)
     .replace("{RESULT_FILE_CONTEXT}", resultFileContext)
     .replace("{WORKFLOW_CONTEXT}", workflowContext);
 }

@@ -121,8 +121,10 @@ describe("coding tool command construction", () => {
     expect(spec.command).toBe("/bin/claude");
     expect(spec.args).toContain("--output-format");
     expect(spec.args).toContain("stream-json");
-    expect(spec.args).toContain("acceptEdits");
-    expect(spec.args).toContain("--allowedTools");
+    expect(spec.args).toContain("bypassPermissions");
+    expect(spec.args).toContain("--dangerously-skip-permissions");
+    expect(spec.args).not.toContain("acceptEdits");
+    expect(spec.args).not.toContain("--allowedTools");
     expect(spec.stdin).toBe("prompt");
   });
 
@@ -136,10 +138,9 @@ describe("coding tool command construction", () => {
 
     expect(spec.command).toBe("/bin/codex");
     expect(spec.args).toContain("--json");
-    expect(spec.args).toContain("workspace-write");
-    expect(spec.args).not.toContain(
-      "--dangerously-bypass-approvals-and-sandbox",
-    );
+    expect(spec.args).toContain("danger-full-access");
+    expect(spec.args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(spec.args).not.toContain("workspace-write");
     expect(spec.args.at(-1)).toBe("-");
     expect(spec.stdin).toBe("prompt");
   });
