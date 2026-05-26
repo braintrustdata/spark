@@ -171,9 +171,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
   const instrumentation = await selectInstrumentationChoice(deps);
   if (!isManualInstrumentationChoice(instrumentation)) {
-    prompts.log.info(
-      `Using ${pc.cyan(instrumentation.label)} for instrumentation.`,
-    );
+    prompts.log.info(`Using ${instrumentation.label} for instrumentation.`);
     await deps.codingTools.smokeTest({
       id: instrumentation.id,
       cwd: deps.cwd,
