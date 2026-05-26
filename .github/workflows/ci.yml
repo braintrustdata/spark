@@ -24,11 +24,8 @@ jobs:
 
       - uses: ./.github/actions/setup
 
-      - name: Build default CLI
+      - name: Build CLIs
         run: pnpm build
-
-      - name: Build beau CLI
-        run: pnpm build:beau
 
   build-binary:
     name: Build binaries

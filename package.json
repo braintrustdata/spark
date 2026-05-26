@@ -1,6 +1,6 @@
 {
-  "name": "spark",
-  "//": "The following version is NOT spark's version. Spark version is tracked in packages/spark/package.json",
+  "name": "braintrust-setup-workspace",
+  "//": "The following version is NOT the CLI version. CLI version is tracked in packages/spark/package.json",
   "version": "0.0.0",
   "private": true,
   "description": "CLI wizard to get your project set up with Braintrust",
@@ -8,18 +8,19 @@
   "type": "module",
   "packageManager": "pnpm@10.33.3",
   "scripts": {
-    "start": "pnpm --filter spark start",
-    "build": "pnpm --filter spark build",
-    "build:sea": "pnpm build && node scripts/build-sea.mjs",
-    "start:beau": "pnpm --filter spark start:beau",
-    "build:beau": "pnpm --filter spark build:beau",
-    "typings": "pnpm -r run typings",
-    "test": "pnpm -r run test",
-    "lint": "pnpm -r run lint",
+    "start": "pnpm build && node packages/spark/dist/cli.mjs",
+    "build": "turbo run build",
+    "build:sea": "turbo run build --filter=./packages/spark && node scripts/build-sea.mjs",
+    "watch": "turbo run watch --filter=./packages/spark",
+    "start:beau": "pnpm build && node packages/spark/dist/cli.beau.js",
+    "typings": "turbo run typings",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
   "devDependencies": {
-    "prettier": "3.8.3"
+    "prettier": "3.8.3",
+    "turbo": "^2.9.14"
   }
 }

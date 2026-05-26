@@ -3,46 +3,51 @@ import { cwd as processCwd } from "node:process";
 import pc from "picocolors";
 
 import {
-  WizardSessionAuthClient,
+  loginWithWizardSession as loginWithWizardSessionRequest,
   type WizardSessionCompleteResult,
+  type WizardSessionLogin,
 } from "./auth";
 import { BraintrustApiClient } from "./braintrust-api";
 import { openBrowser } from "./browser";
-import { buildLogsPermalink, buildCleanupMessage } from "./cleanup";
-import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
+import { buildLogsPermalink } from "./cleanup";
 import {
-  allocateResultFile,
-  buildHarnessCommand,
-  ensureBtOnPath,
-  runHarness,
-  writePromptToTemp,
-} from "./instrument";
-import { detectLanguages, type DetectedLanguage } from "./language-detect";
+  buildToolUnavailableMessage,
+  codingToolLabel,
+  discoverCodingTools,
+  runCodingTool,
+  smokeTestCodingTool,
+  type CodingToolId,
+  type CodingToolEvent,
+  type CodingToolRunResult,
+  type CodingToolStatus,
+} from "./coding-tools";
+import { findGitRoot, isGitRepo, writeEnvBraintrust } from "./git";
+import { allocateResultFile, readResultFile } from "./instrument";
 import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
-import {
-  LLM_PROVIDERS,
-  type LlmProvider,
-  type CredentialField,
-} from "./providers";
-import {
-  DOCS_URL,
-  NOT_GIT_REPO_WARNING,
-  PROVIDER_KEY_QUESTION,
-  PROVIDER_QUESTION,
-  RUN_HARNESS_QUESTION,
-  WIZARD_CANCEL_MESSAGE,
-  WIZARD_TITLE,
-  gitignoreNote,
-  promptSavedNote,
-  wizardLoginPrompt,
-  terminalHyperlink,
-} from "./wizard-copy";
+import { ClackToolRenderer } from "./tool-ui";
+import { gitignoreNote, terminalHyperlink } from "./wizard-utils";
+
+const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
+const INSTRUMENTATION_DOCS_URL =
+  "https://www.braintrust.dev/docs/instrument/trace-llm-calls";
+
+type ManualInstrumentationChoice = {
+  readonly id: "manual";
+  readonly label: "Manually instrument";
+};
+
+type InstrumentationChoice = CodingToolStatus | ManualInstrumentationChoice;
+
+const MANUAL_INSTRUMENTATION_CHOICE: ManualInstrumentationChoice = {
+  id: "manual",
+  label: "Manually instrument",
+};
 
 type SelectOption<T> = {
   readonly label: string;
   readonly value: T;
-  readonly hint?: string;
+  readonly hint?: string | undefined;
 };
 
 export type ClackWizardPrompts = {
@@ -66,6 +71,15 @@ export type ClackWizardPrompts = {
     readonly message: string;
     readonly placeholder?: string;
   }) => Promise<string | symbol>;
+  readonly spinner: () => {
+    readonly start: (message?: string) => void;
+    readonly stop: (message?: string) => void;
+  };
+  readonly codingAgentOutput?: (options: { readonly toolLabel: string }) => {
+    readonly event: (event: CodingToolEvent) => void;
+    readonly fail: (message: string) => Promise<void> | void;
+    readonly success: (message: string) => Promise<void> | void;
+  };
   readonly log: {
     readonly warn: (message: string) => void;
     readonly info: (message: string) => void;
@@ -80,8 +94,24 @@ export type WizardDeps = {
   readonly env: NodeJS.ProcessEnv;
   readonly options: WizardOptions;
   readonly prompts: ClackWizardPrompts;
-  readonly authClient: WizardSessionAuthClient;
+  readonly loginWithWizardSession: WizardSessionLogin;
   readonly openBrowser: (url: string) => Promise<boolean>;
+  readonly codingTools: CodingToolRuntime;
+};
+
+export type CodingToolRuntime = {
+  readonly discover: () => Promise<readonly CodingToolStatus[]>;
+  readonly smokeTest: (args: {
+    readonly id: CodingToolId;
+    readonly cwd: string;
+  }) => Promise<CodingToolRunResult>;
+  readonly run: (args: {
+    readonly id: CodingToolId;
+    readonly cwd: string;
+    readonly prompt: string;
+    readonly env: NodeJS.ProcessEnv;
+    readonly onEvent: (event: CodingToolEvent) => void;
+  }) => Promise<CodingToolRunResult>;
 };
 
 export class WizardCancelledError extends Error {
@@ -107,10 +137,27 @@ export type WizardResult = {
 
 export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   const { prompts } = deps;
-  prompts.intro(WIZARD_TITLE);
+  prompts.intro("Welcome to the Braintrust setup wizard");
+  prompts.note(
+    "You'll sign in with Braintrust, choose an org and project, save an API key for this repo, then run a coding tool to add instrumentation.",
+    "Setup plan",
+  );
 
   if (!(await isGitRepo(deps.cwd))) {
-    prompts.log.warn(NOT_GIT_REPO_WARNING);
+    prompts.log.warn(
+      "Heads up: this folder is not a git repository. The wizard may edit files; consider running it inside a checked-in repo.",
+    );
+    const continueOutsideGit = unwrap(
+      prompts,
+      await prompts.confirm({
+        initialValue: false,
+        message: "Continue without a git repository?",
+      }),
+    );
+    if (!continueOutsideGit) {
+      prompts.cancel(WIZARD_CANCEL_MESSAGE);
+      throw new WizardCancelledError();
+    }
   }
 
   const session =
@@ -120,35 +167,22 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
           projectId: deps.options.projectId,
           apiUrl: deps.options.apiUrl,
         })
-      : await deps.authClient.login({
-          onLoginUrl: ({ loginUrl, verificationCode }) => {
-            prompts.log.message(terminalHyperlink(loginUrl));
-            prompts.note(wizardLoginPrompt({ verificationCode }), "Login");
-          },
-          onTryOpenBrowser: (url) => deps.openBrowser(url),
-        });
+      : await loginWithBrowser(deps);
 
-  prompts.log.success(
-    `Browser setup complete.\n  org: ${pc.greenBright(session.orgName)}\n  project: ${pc.greenBright(session.projectName)}`,
-  );
-
-  const provider = await selectProvider(deps);
-  let providerCredentials: Record<string, string> | undefined;
-  if (!provider.custom) {
-    if (
-      deps.options.providerApiKey !== undefined &&
-      provider.envVar !== undefined &&
-      deps.options.provider?.id === provider.id
-    ) {
-      providerCredentials = { [provider.envVar]: deps.options.providerApiKey };
-    } else {
-      providerCredentials = await collectCredentials(prompts, provider);
-    }
+  const instrumentation = await selectInstrumentationChoice(deps);
+  if (!isManualInstrumentationChoice(instrumentation)) {
+    prompts.log.info(`Using ${instrumentation.label} for instrumentation.`);
+    await deps.codingTools.smokeTest({
+      id: instrumentation.id,
+      cwd: deps.cwd,
+    });
   }
 
   const gitRoot = await findGitRoot(deps.cwd);
+  let envFilePath: string | undefined;
   if (gitRoot) {
     const result = await writeEnvBraintrust(gitRoot, session.apiKey);
+    envFilePath = result.envFilePath;
     prompts.log.success(`Wrote ${result.envFilePath}`);
     prompts.log.info(
       gitignoreNote({
@@ -162,50 +196,24 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
   }
 
-  const canInstrument = !provider.custom && providerCredentials !== undefined;
-  const languages = detectLanguages(deps.cwd);
-
-  let tracePermalink: string | undefined;
-  let resumeCommand: string | undefined;
-  if (canInstrument) {
-    const runIt = deps.options.instrument
-      ? true
-      : unwrap(
-          prompts,
-          await prompts.confirm({
-            initialValue: true,
-            message: RUN_HARNESS_QUESTION,
-          }),
-        );
-    if (runIt) {
-      const result = await runInstrumentation(deps, {
-        org: session.orgName,
-        project: session.projectName,
-        apiKey: session.apiKey,
-        providerCredentials,
-        languages,
-      });
-      tracePermalink = result.tracePermalink;
-      resumeCommand = result.resumeCommand;
-    } else {
-      const { path } = writePromptToTemp(
-        renderPrompt({ languages, interactive: false }),
-      );
-      prompts.note(promptSavedNote(path), "Prompt saved");
-    }
+  if (isManualInstrumentationChoice(instrumentation)) {
+    await confirmManualInstrumentation(prompts);
   } else {
-    const { path } = writePromptToTemp(
-      renderPrompt({ languages, interactive: false }),
-    );
-    prompts.note(promptSavedNote(path), "Prompt saved");
+    await runInstrumentation(deps, {
+      org: session.orgName,
+      project: session.projectName,
+      apiKey: session.apiKey,
+      toolId: instrumentation.id,
+    });
   }
 
+  const projectLogsUrl = `${deps.options.appUrl}/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
+  prompts.log.info(`Check your Braintrust logs: ${projectLogsUrl}`);
+
+  await confirmProductionApiKey(prompts, envFilePath);
+
   prompts.outro(
-    buildCleanupMessage({
-      docsUrl: DOCS_URL,
-      tracePermalink,
-      resumeCommand,
-    }),
+    ["Setup complete.", "", `Docs: ${INSTRUMENTATION_DOCS_URL}`].join("\n"),
   );
 
   return {
@@ -215,53 +223,159 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   };
 }
 
-async function collectCredentials(
-  prompts: ClackWizardPrompts,
-  provider: LlmProvider,
-): Promise<Record<string, string> | undefined> {
-  const fields: readonly CredentialField[] = provider.credentials ?? [
-    { envVar: provider.envVar!, label: provider.label, secret: true },
-  ];
-  const result: Record<string, string> = {};
-  for (const field of fields) {
-    const raw = unwrap(
-      prompts,
-      field.secret !== false
-        ? await prompts.password({
-            message: PROVIDER_KEY_QUESTION(field.label),
-          })
-        : await prompts.text({ message: PROVIDER_KEY_QUESTION(field.label) }),
-    );
-    const value = raw ?? "";
-    if (value.length > 0) {
-      result[field.envVar] = value;
+async function loginWithBrowser(
+  deps: WizardDeps,
+): Promise<WizardSessionCompleteResult> {
+  const { prompts } = deps;
+  const spinner = prompts.spinner();
+  let spinnerStarted = false;
+
+  try {
+    const session = await deps.loginWithWizardSession({
+      onLoginUrl: ({ loginUrl, verificationCode }) => {
+        prompts.log.info(
+          [
+            `Sign in: ${terminalHyperlink(loginUrl)}`,
+            "",
+            "If your browser didn't open automatically, open the link above to sign in.",
+            `Verification code: ${pc.reset(pc.bold(pc.whiteBright(verificationCode)))}`,
+            "",
+            "Choose the org and project you want to use; the wizard will resume here.",
+          ].join("\n"),
+        );
+        spinner.start("Waiting for login in browser...");
+        spinnerStarted = true;
+      },
+      onTryOpenBrowser: (url) => deps.openBrowser(url),
+    });
+    if (spinnerStarted) {
+      spinner.stop(
+        `Browser setup complete. (org: ${pc.greenBright(session.orgName)}, project: ${pc.greenBright(session.projectName)})`,
+      );
+      spinnerStarted = false;
     }
+    return session;
+  } finally {
+    if (spinnerStarted) spinner.stop("Browser setup stopped.");
   }
-  if (Object.keys(result).length === 0) {
-    prompts.log.warn("No credentials entered; skipping instrumentation.");
-    return undefined;
-  }
-  return result;
 }
 
-async function selectProvider(deps: WizardDeps): Promise<LlmProvider> {
-  if (deps.options.provider) {
-    return deps.options.provider;
-  }
+async function selectInstrumentationChoice(
+  deps: WizardDeps,
+): Promise<InstrumentationChoice> {
   const { prompts } = deps;
+  const statuses = await deps.codingTools.discover();
+  if (deps.options.tool) {
+    const selected = statuses.find((status) => status.id === deps.options.tool);
+    if (!selected || !selected.usable) {
+      throw new Error(
+        selected
+          ? buildToolUnavailableMessage(selected)
+          : `Unknown coding tool: ${deps.options.tool}`,
+      );
+    }
+    return selected;
+  }
+
+  const usable = statuses.filter((status) => status.usable);
+  if (usable.length === 0 && statuses.length > 0) {
+    prompts.log.warn(
+      [
+        "No usable coding agents found.",
+        ...statuses.map(
+          (status) =>
+            `- ${status.label}: ${buildToolUnavailableMessage(status)}`,
+        ),
+      ].join("\n"),
+    );
+  }
+
   const value = unwrap(
     prompts,
-    await prompts.select<LlmProvider>({
-      message: PROVIDER_QUESTION,
-      options: LLM_PROVIDERS.map((p) => ({ label: p.label, value: p })),
+    await prompts.select<InstrumentationChoice>({
+      message: "Which coding agent should Braintrust Setup use?",
+      options: [
+        ...usable.map((tool) => ({
+          label: tool.label,
+          value: tool,
+          hint: tool.authMode ?? tool.version,
+        })),
+        {
+          label: MANUAL_INSTRUMENTATION_CHOICE.label,
+          value: MANUAL_INSTRUMENTATION_CHOICE,
+          hint: "Use the docs yourself",
+        },
+      ],
     }),
   );
   return value;
 }
 
+function isManualInstrumentationChoice(
+  choice: InstrumentationChoice,
+): choice is ManualInstrumentationChoice {
+  return choice.id === "manual";
+}
+
+async function confirmManualInstrumentation(
+  prompts: ClackWizardPrompts,
+): Promise<void> {
+  prompts.note(
+    [
+      "Follow the Braintrust instrumentation docs for your project.",
+      "",
+      terminalHyperlink(INSTRUMENTATION_DOCS_URL),
+    ].join("\n"),
+    "Manual instrumentation",
+  );
+  const completed = unwrap(
+    prompts,
+    await prompts.confirm({
+      initialValue: false,
+      message: "Have you completed the Braintrust instrumentation docs?",
+    }),
+  );
+  if (!completed) {
+    prompts.cancel(WIZARD_CANCEL_MESSAGE);
+    throw new WizardCancelledError();
+  }
+}
+
+async function confirmProductionApiKey(
+  prompts: ClackWizardPrompts,
+  envFilePath: string | undefined,
+): Promise<void> {
+  prompts.note(
+    envFilePath
+      ? `The generated .env.braintrust file contains a BRAINTRUST_API_KEY token. Add that token to your deployment platform's environment variables so tracing works in production.\n\nFile: ${envFilePath}`
+      : "Add the BRAINTRUST_API_KEY token to your deployment platform's environment variables so tracing works in production.",
+    "Production token",
+  );
+  const productionTokenStatus = unwrap(
+    prompts,
+    await prompts.select<"done" | "later">({
+      message: "Have you added BRAINTRUST_API_KEY to your deployment platform?",
+      options: [
+        {
+          label: "I added it",
+          value: "done",
+        },
+        {
+          label: "I will do that later",
+          value: "later",
+        },
+      ],
+    }),
+  );
+  if (productionTokenStatus === "later") {
+    prompts.log.warn(
+      "Do not forget to add BRAINTRUST_API_KEY to production. Braintrust tracing will not work in production without it.",
+    );
+  }
+}
+
 type InstrumentationResult = {
   readonly tracePermalink: string | undefined;
-  readonly resumeCommand: string | undefined;
 };
 
 async function runInstrumentation(
@@ -270,55 +384,56 @@ async function runInstrumentation(
     readonly org: string;
     readonly project: string;
     readonly apiKey: string;
-    readonly providerCredentials?: Readonly<Record<string, string>>;
-    readonly languages: readonly DetectedLanguage[];
+    readonly toolId: CodingToolId;
   },
 ): Promise<InstrumentationResult> {
   const { prompts } = deps;
-  const installResult = await ensureBtOnPath();
-  switch (installResult.status) {
-    case "already-installed":
-      break;
-    case "installed":
-      prompts.log.success("Installed `bt`.");
-      break;
-    case "skipped":
-      prompts.log.warn(`Skipping \`bt\` install: ${installResult.reason}`);
-      break;
-    case "failed":
-      prompts.log.error(`Couldn't install \`bt\`: ${installResult.reason}`);
-      break;
-  }
-
   const resultFilePath = allocateResultFile();
   const promptText = renderPrompt({
-    languages: args.languages,
-    interactive: !deps.options.yolo,
+    interactive: false,
     yolo: deps.options.yolo,
     resultFilePath,
+    orgName: args.org,
+    projectName: args.project,
   });
-  const harnessResult = await runHarness({
-    prompt: promptText,
-    cwd: deps.cwd,
-    braintrustApiKey: args.apiKey,
-    resultFilePath,
-    providerCredentials: args.providerCredentials,
-    languages: args.languages,
-  });
+  const toolLabel = codingToolLabel(args.toolId);
+  const renderer = new ClackToolRenderer(prompts, toolLabel);
+  let toolResult: CodingToolRunResult;
+  try {
+    toolResult = await deps.codingTools.run({
+      id: args.toolId,
+      prompt: promptText,
+      cwd: deps.cwd,
+      env: {
+        ...deps.env,
+        BRAINTRUST_API_KEY: args.apiKey,
+        BT_WIZARD_RESULT_FILE: resultFilePath,
+      },
+      onEvent: (event) => renderer.event(event),
+    });
+  } catch (error) {
+    await renderer.error("Coding agent failed.");
+    throw error;
+  }
 
-  if (harnessResult.status === "harness-not-found") {
-    const { path } = writePromptToTemp(promptText);
-    prompts.log.warn(
-      `Harness not found. Wrote prompt to ${path}; run a coding agent against it manually.`,
+  if (toolResult.exitCode !== 0) {
+    await renderer.error(
+      `${toolLabel} exited with code ${toolResult.exitCode}.`,
     );
-    return { tracePermalink: undefined, resumeCommand: undefined };
+    prompts.log.warn(`Coding tool exited with code ${toolResult.exitCode}.`);
+  } else if (toolResult.finalText.includes("INSTRUMENTATION_INCOMPLETE")) {
+    await renderer.error("Instrumentation incomplete.");
+    prompts.log.warn("The coding tool reported incomplete instrumentation.");
+  } else if (toolResult.finalText.includes("INSTRUMENTATION_COMPLETE")) {
+    await renderer.success("Instrumentation complete.");
+  } else {
+    await renderer.success(`${toolLabel} finished.`);
   }
-  if (harnessResult.exitCode !== 0) {
-    prompts.log.warn(`Harness exited with code ${harnessResult.exitCode}.`);
-  }
+
   return {
-    tracePermalink: harnessResult.tracePermalink,
-    resumeCommand: buildHarnessCommand(harnessResult.promptFilePath),
+    tracePermalink:
+      readResultFile(resultFilePath) ??
+      extractTracePermalink(toolResult.finalText),
   };
 }
 
@@ -349,16 +464,26 @@ async function loginWithCiCredentials(args: {
 export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
   const cwd = args.cwd ?? processCwd();
   const env = args.env ?? process.env;
-  const authClient = new WizardSessionAuthClient(args.options.appUrl);
   return {
     cwd,
     env,
     options: args.options,
     prompts: args.prompts,
-    authClient,
+    loginWithWizardSession: (events) =>
+      loginWithWizardSessionRequest({ appUrl: args.options.appUrl, events }),
     openBrowser,
+    codingTools: {
+      discover: discoverCodingTools,
+      smokeTest: smokeTestCodingTool,
+      run: runCodingTool,
+    },
   };
 }
 
 // Exported for permalink construction in callers that get a span back.
 export { buildLogsPermalink };
+
+function extractTracePermalink(text: string): string | undefined {
+  const match = text.match(/https?:\/\/\S+\/logs\?\S+/);
+  return match?.[0]?.replace(/[),.;\]]+$/, "");
+}

@@ -21,25 +21,3 @@ export function buildLogsPermalink(
   }
   return `${base}?${params.toString()}`;
 }
-
-export type CleanupContext = {
-  readonly docsUrl: string;
-  readonly tracePermalink: string | undefined;
-  readonly resumeCommand?: string;
-};
-
-export function buildCleanupMessage(ctx: CleanupContext): string {
-  const lines = [
-    "Setup complete.",
-    "",
-    "For production runs, set the BRAINTRUST_API_KEY environment variable.",
-    `Docs: ${ctx.docsUrl}`,
-  ];
-  if (ctx.resumeCommand) {
-    lines.push("", "To resume the coding agent:", `  ${ctx.resumeCommand}`);
-  }
-  if (ctx.tracePermalink) {
-    lines.push(`Trace: ${ctx.tracePermalink}`);
-  }
-  return lines.join("\n");
-}

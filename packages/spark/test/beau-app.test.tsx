@@ -6,8 +6,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { App, easeLayoutTransitionProgress } from "../src/beau/App";
 import { AppRoot } from "../src/beau/AppRoot";
-import { ACCOUNT_QUESTION } from "../src/wizard-copy";
 
+const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const STRIP_PATTERN = /[▌▐]/;
 const LOGO_PATTERN = /[▟▜▘▝▖▗▙▛█]/;
 const LOGO_BODY_SPLIT_PATTERN = /[█]{3,}[▌▐]+[█]{3,}/;

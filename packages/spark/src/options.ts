@@ -1,7 +1,11 @@
 import yargs from "yargs/yargs";
 
 import pkg from "../package.json" with { type: "json" };
-import { LLM_PROVIDERS, type LlmProvider } from "./providers";
+import {
+  codingToolIds,
+  parseCodingToolId,
+  type CodingToolId,
+} from "./coding-tools";
 
 export type WizardOptions = {
   readonly apiUrl: string;
@@ -9,10 +13,8 @@ export type WizardOptions = {
   readonly caCertPath: string | undefined;
   readonly apiKey: string | undefined;
   readonly projectId: string | undefined;
-  readonly instrument: boolean;
   readonly yolo: boolean;
-  readonly provider: LlmProvider | undefined;
-  readonly providerApiKey: string | undefined;
+  readonly tool: CodingToolId | undefined;
 };
 
 const DEFAULT_API_URL = "https://api.braintrust.dev";
@@ -20,7 +22,7 @@ const DEFAULT_APP_URL = "https://www.braintrust.dev";
 
 function buildParser(env: NodeJS.ProcessEnv) {
   return yargs([])
-    .scriptName("spark")
+    .scriptName("braintrust-setup")
     .usage("$0 [options]")
     .option("api-url", {
       type: "string",
@@ -36,6 +38,12 @@ function buildParser(env: NodeJS.ProcessEnv) {
       type: "string",
       description: "Path to PEM CA bundle",
       default: env["BRAINTRUST_CA_CERT"] ?? env["SSL_CERT_FILE"],
+    })
+    .option("tool", {
+      type: "string",
+      description: "Coding tool to run non-interactively",
+      choices: [...codingToolIds()],
+      default: env["BRAINTRUST_SETUP_TOOL"],
     })
     .help()
     .alias("h", "help")
@@ -64,41 +72,23 @@ export async function parseArgs(
   const parser = buildParser(env);
   const parsed = await parser.parseAsync([...argv]);
 
-  const apiKey = readEnvString(env, "BRAINTRUST_SPARK_API_KEY");
-  const projectId = readEnvString(env, "BRAINTRUST_SPARK_PROJECT_ID");
+  const apiKey = readEnvString(env, "BRAINTRUST_SETUP_API_KEY");
+  const projectId = readEnvString(env, "BRAINTRUST_SETUP_PROJECT_ID");
 
   if ((apiKey === undefined) !== (projectId === undefined)) {
     throw new Error(
-      "BRAINTRUST_SPARK_API_KEY and BRAINTRUST_SPARK_PROJECT_ID must both be set together",
+      "BRAINTRUST_SETUP_API_KEY and BRAINTRUST_SETUP_PROJECT_ID must both be set together",
     );
   }
 
-  const yolo = readEnvBool(env, "BRAINTRUST_SPARK_YOLO");
+  const yolo = readEnvBool(env, "BRAINTRUST_SETUP_YOLO");
 
-  const providerId = readEnvString(env, "BRAINTRUST_SPARK_PROVIDER");
-  const providerApiKey = readEnvString(
-    env,
-    "BRAINTRUST_SPARK_PROVIDER_API_KEY",
-  );
-
-  let provider: LlmProvider | undefined;
-  if (providerId !== undefined) {
-    const match = LLM_PROVIDERS.find((p) => p.id === providerId);
-    if (!match) {
-      const known = LLM_PROVIDERS.map((p) => p.id).join(", ");
-      throw new Error(
-        `Unknown BRAINTRUST_SPARK_PROVIDER "${providerId}". Known providers: ${known}`,
-      );
-    }
-    provider = match;
-  }
-
-  if (providerApiKey !== undefined) {
-    if (!provider) {
-      throw new Error(
-        "BRAINTRUST_SPARK_PROVIDER_API_KEY requires BRAINTRUST_SPARK_PROVIDER",
-      );
-    }
+  const toolRaw = (parsed["tool"] as string | undefined) || undefined;
+  const tool = toolRaw ? parseCodingToolId(toolRaw) : undefined;
+  if (toolRaw && !tool) {
+    throw new Error(
+      `Unknown coding tool "${toolRaw}". Known tools: ${codingToolIds().join(", ")}`,
+    );
   }
 
   return {
@@ -107,10 +97,8 @@ export async function parseArgs(
     caCertPath: (parsed["ca-cert"] as string | undefined) || undefined,
     apiKey,
     projectId,
-    instrument: readEnvBool(env, "BRAINTRUST_SPARK_INSTRUMENT") || yolo,
     yolo,
-    provider,
-    providerApiKey,
+    tool,
   };
 }
 

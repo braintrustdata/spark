@@ -1,4 +1,4 @@
-# spark
+# Braintrust Setup CLI
 
 CLI wizard to get your project set up with Braintrust.
 
@@ -6,11 +6,10 @@ CLI wizard to get your project set up with Braintrust.
 
 ### WIP
 
-Soon, `curl -fsSL https://braintrust.dev/spark.sh | sh` will work and:
+Soon, `curl -fsSL https://braintrust.dev/cli/braintrust-setup.sh | sh` will work and:
 
-- install `bt` if missing (latest stable version)
-- install the latest `spark` version
-- launch `spark`
+- install the latest Braintrust Setup version
+- launch Braintrust Setup
 
 #### extra WIP
 
@@ -22,20 +21,20 @@ Pass a version as a positional argument after `sh -s --`:
 
 ```sh
 # Latest stable (default)
-curl -fsSL https://braintrust.dev/cli/spark.sh | sh
+curl -fsSL https://braintrust.dev/cli/braintrust-setup.sh | sh
 
 # Latest canary / prerelease
-curl -fsSL https://braintrust.dev/cli/spark.sh | sh -s -- canary
+curl -fsSL https://braintrust.dev/cli/braintrust-setup.sh | sh -s -- canary
 
 # Pinned tag
-curl -fsSL https://braintrust.dev/cli/spark.sh | sh -s -- v0.0.1
+curl -fsSL https://braintrust.dev/cli/braintrust-setup.sh | sh -s -- v0.0.1
 ```
 
 Supported environment variables (set them before `curl`):
 
-- `XDG_BIN_HOME` — install directory for the `spark` binary. Defaults to `~/.local/bin`.
+- `XDG_BIN_HOME` — install directory for the `braintrust-setup` binary. Defaults to `~/.local/bin`.
 
-On the first run, `spark` will install the custom `pi` harness to `~/.cache/spark/<sha256-prefix>/spark-harness/`, entrypoint in `~/.cache/spark/<hash>/spark-harness/bin/spark-harness.mjs`.
+During setup, Braintrust Setup discovers installed local coding tools and can run Claude Code or Codex non-interactively using the user's existing subscription or token. Use `--tool claude`, `--tool codex`, or `BRAINTRUST_SETUP_TOOL` to force a specific tool.
 
 ## Development
 
@@ -50,7 +49,7 @@ pnpm install
 pnpm build:sea
 ```
 
-will build `dist-sea/spark`.
+will build `dist-sea/braintrust-setup`.
 See https://nodejs.org/api/single-executable-applications.html (NodeJS 26.1.0) for details.
 
 ## Untested behavior

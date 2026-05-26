@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execFileSync, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, renameSync, rmSync } from "node:fs";
 import { platform } from "node:os";
 
@@ -21,32 +21,15 @@ const run = (cmd, args, opts = {}) => {
   }
 };
 
-// `--build-sea` writes to the literal `output` field from sea-config.json
-// (always "spark"), even on Windows. We add `.exe` only at the final location.
-const sourceBinName = "spark";
-const destBinName = isWindows ? "spark.exe" : "spark";
+// `--build-sea` writes to the literal `output` field from sea-config.json.
+// We add `.exe` only at the final location.
+const sourceBinName = "braintrust-setup";
+const destBinName = isWindows ? "braintrust-setup.exe" : "braintrust-setup";
 
 rmSync("dist-sea", { recursive: true, force: true });
 rmSync("dist-sea-build", { recursive: true, force: true });
 mkdirSync("dist-sea", { recursive: true });
 mkdirSync("dist-sea-build", { recursive: true });
-
-run("pnpm", [
-  "--filter",
-  "@braintrust/spark-harness",
-  "deploy",
-  "--prod",
-  "--legacy",
-  "dist-sea-build/spark-harness",
-]);
-
-run("tar", [
-  "-czf",
-  "dist-sea-build/harness.tgz",
-  "-C",
-  "dist-sea-build",
-  "spark-harness",
-]);
 
 run(process.execPath, ["--build-sea", "sea-config.json"]);
 
