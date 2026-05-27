@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   type WizardSessionCompleteResult,
-  type WizardSessionEvents,
+  type WizardSessionLoginArgs,
   type WizardSessionLogin,
 } from "../src/auth";
 import {
@@ -20,24 +20,33 @@ import {
 
 const WIZARD_INTRO_TITLE = "Welcome to the Braintrust setup wizard";
 const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
+const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_MODE_MESSAGE =
   "How do you want to add Braintrust instrumentation?";
 const TOOL_SELECT_MESSAGE = "Which coding agent should Braintrust Setup use?";
 const OWN_AGENT_DELIVERY_MESSAGE =
   "How should Braintrust Setup deliver the instrumentation prompt?";
-const PRODUCTION_TOKEN_MESSAGE =
-  "Have you added BRAINTRUST_API_KEY to your deployment platform?";
 const ENV_BRAINTRUST_NOTICE =
   "The wizard will now create a .env.braintrust file that is used to authenticate your application to Braintrust. It will be used for local testing.";
 
 const CANCEL = Symbol("cancel");
 
 type ConfirmAnswer = boolean | typeof CANCEL;
+type SelectAnswer =
+  | "first"
+  | "built-in"
+  | "own-agent"
+  | "manual"
+  | "clipboard"
+  | "terminal"
+  | "production-done"
+  | "production-later"
+  | typeof CANCEL;
 type TextAnswer = string | typeof CANCEL;
 
 type FakePromptInputs = {
   readonly confirms?: ConfirmAnswer[];
-  readonly selects?: ReadonlyArray<unknown>;
+  readonly selects?: readonly SelectAnswer[];
   readonly texts?: TextAnswer[];
   readonly passwords?: TextAnswer[];
 };
@@ -53,13 +62,13 @@ function createPrompts(inputs: FakePromptInputs) {
     cancel(message) {
       events.push(`cancel:${message}`);
     },
-    async confirm(options) {
+    confirm(options) {
       const next = confirms.shift();
       events.push(`confirm:${options.message}`);
       if (next === undefined) {
         throw new Error(`No confirm answer for: ${options.message}`);
       }
-      return next;
+      return Promise.resolve(next);
     },
     intro(message) {
       events.push(`intro:${message}`);
@@ -74,59 +83,77 @@ function createPrompts(inputs: FakePromptInputs) {
     outro(message) {
       events.push(`outro:${message.split("\n")[0]}`);
     },
-    async password(options) {
+    password(options) {
       const next = passwords.shift();
       events.push(`password:${options.message}`);
       if (next === undefined) {
         throw new Error(`No password answer for: ${options.message}`);
       }
-      return next as string | symbol;
+      return Promise.resolve(next);
     },
-    async select(options) {
+    select<T>(options: {
+      readonly message: string;
+      readonly options: ReadonlyArray<{
+        readonly label: string;
+        readonly value: T;
+        readonly hint?: string | undefined;
+      }>;
+    }) {
       const next = selects.shift();
       events.push(`select:${options.message}`);
       if (next === undefined) {
         throw new Error(`No select answer for: ${options.message}`);
       }
       if (next === "first") {
-        return options.options[0]!.value as symbol;
+        return Promise.resolve(options.options[0]!.value);
       }
       if (next === "built-in") {
-        return options.options.find(
-          (option) => option.label === "Use built-in coding agent",
-        )!.value as symbol;
+        return Promise.resolve(
+          options.options.find(
+            (option) => option.label === "Use built-in coding agent",
+          )!.value,
+        );
       }
       if (next === "own-agent") {
-        return options.options.find(
-          (option) => option.label === "Use own coding agent",
-        )!.value as symbol;
+        return Promise.resolve(
+          options.options.find(
+            (option) => option.label === "Use own coding agent",
+          )!.value,
+        );
       }
       if (next === "manual") {
-        return options.options.find(
-          (option) => option.label === "Set up manually",
-        )!.value as symbol;
+        return Promise.resolve(
+          options.options.find((option) => option.label === "Set up manually")!
+            .value,
+        );
       }
-      if (next === "clipboard") {
-        return "clipboard" as unknown as symbol;
+      if (
+        next === "clipboard" ||
+        next === "terminal" ||
+        next === "production-done" ||
+        next === "production-later"
+      ) {
+        const value =
+          next === "production-done"
+            ? "done"
+            : next === "production-later"
+              ? "later"
+              : next;
+        const option = options.options.find((option) => option.value === value);
+        if (!option) {
+          throw new Error(`No select option for: ${next}`);
+        }
+        return Promise.resolve(option.value);
       }
-      if (next === "terminal") {
-        return "terminal" as unknown as symbol;
-      }
-      if (next === "production-done") {
-        return "done" as unknown as symbol;
-      }
-      if (next === "production-later") {
-        return "later" as unknown as symbol;
-      }
-      return next as symbol;
+      return Promise.resolve(next);
     },
-    async text(options) {
+    text(options) {
       const next = texts.shift();
       events.push(`text:${options.message}`);
       if (next === undefined) {
         throw new Error(`No text answer for: ${options.message}`);
       }
-      return next as string | symbol;
+      return Promise.resolve(next);
     },
     spinner() {
       return {
@@ -179,13 +206,12 @@ function buildDeps(args: {
   readonly loginWithWizardSession?: WizardSessionLogin;
   readonly cwd?: string;
   readonly codingTools?: CodingToolRuntime;
-  readonly tool?: "claude" | "codex";
   readonly writeClipboard?: (text: string) => Promise<void>;
 }): WizardDeps {
   const cwd = args.cwd ?? createGitTempDir();
   const stubLogin =
     args.loginWithWizardSession ??
-    (async (events: WizardSessionEvents) => {
+    (async ({ events }: WizardSessionLoginArgs) => {
       events.onLoginUrl({
         loginUrl: "https://app.test/app/cli-login?session_token=test",
         expiresAt: "2099-01-01T00:00:00.000Z",
@@ -203,35 +229,37 @@ function buildDeps(args: {
     options: {
       apiUrl: "https://api.test",
       appUrl: "https://app.test",
-      caCertPath: undefined,
       apiKey: undefined,
       projectId: undefined,
+      orgId: undefined,
+      projId: undefined,
       yolo: false,
-      tool: args.tool,
     },
     prompts: args.prompts,
     loginWithWizardSession: stubLogin,
-    openBrowser: async () => true,
-    writeClipboard: args.writeClipboard ?? (async () => {}),
+    openBrowser: () => Promise.resolve(true),
+    writeClipboard: args.writeClipboard ?? (() => Promise.resolve()),
     codingTools:
       args.codingTools ??
       ({
-        discover: async () => [
-          {
-            id: "claude",
-            label: "Claude Code",
-            command: "claude",
-            installed: true,
-            usable: true,
-            authMode: "pro",
-          },
-        ],
-        smokeTest: async () => ({
-          exitCode: 0,
-          signal: null,
-          finalText: "BRAINTRUST_SETUP_TOOL_OK",
-        }),
-        run: async ({ env, onEvent, prompt }) => {
+        discover: () =>
+          Promise.resolve([
+            {
+              id: "claude",
+              label: "Claude Code",
+              command: "claude",
+              installed: true,
+              usable: true,
+              authMode: "pro",
+            },
+          ]),
+        smokeTest: () =>
+          Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          }),
+        run: ({ env, onEvent, prompt }) => {
           expect(env["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
           expect(env["BT_WIZARD_RESULT_FILE"]).toBeDefined();
           expect(env["BT_WIZARD_LANGUAGES"]).toBeUndefined();
@@ -244,12 +272,12 @@ function buildDeps(args: {
             toolInput: "file_path: package.json",
             toolName: "Edit",
           });
-          return {
+          return Promise.resolve({
             exitCode: 0,
             signal: null,
             finalText:
               "Instrumentation done\nhttps://www.braintrust.dev/acme/p/demo/logs?r=abc\nINSTRUMENTATION_COMPLETE",
-          };
+          });
         },
       } satisfies CodingToolRuntime),
   };
@@ -258,6 +286,7 @@ function buildDeps(args: {
 describe("runClackWizard", () => {
   it("walks through the happy path with one usable coding tool", async () => {
     const { prompts, events } = createPrompts({
+      confirms: [true],
       selects: ["first", "first", "production-done"],
     });
     const deps = buildDeps({ prompts });
@@ -269,6 +298,7 @@ describe("runClackWizard", () => {
     expect(result.braintrustApiKey).toBe("bt-secret-key");
     expect(events[0]).toBe(`intro:${WIZARD_INTRO_TITLE}`);
     expect(events).toContain("note:Setup plan");
+    expect(events).toContain(`confirm:${ACCOUNT_QUESTION}`);
     expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
     expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
     expect(events.some((event) => event.startsWith("info:Sign in:"))).toBe(
@@ -311,33 +341,66 @@ describe("runClackWizard", () => {
     );
   });
 
+  it("passes browser auth mode based on the account answer", async () => {
+    const cases = [
+      { answer: true, expectedAuthMode: "signin" },
+      { answer: false, expectedAuthMode: "signup" },
+    ] as const;
+
+    for (const { answer, expectedAuthMode } of cases) {
+      let authMode: string | undefined;
+      const { prompts } = createPrompts({
+        confirms: [answer, true],
+        selects: ["manual", "production-done"],
+      });
+      const deps = buildDeps({
+        prompts,
+        loginWithWizardSession: async ({ events, loginUrlParams }) => {
+          authMode = loginUrlParams?.authMode;
+          events.onLoginUrl({
+            loginUrl: "https://app.test/app/cli-login?session_token=test",
+            expiresAt: "2099-01-01T00:00:00.000Z",
+            verificationCode: "123456",
+          });
+          await events.onTryOpenBrowser(
+            "https://app.test/app/cli-login?session_token=test",
+          );
+          return DEFAULT_LOGIN_RESULT;
+        },
+      });
+
+      await runClackWizard(deps);
+      expect(authMode).toBe(expectedAuthMode);
+    }
+  });
+
   it("cancels cleanly when the user aborts the tool select", async () => {
-    const { prompts, events } = createPrompts({ selects: ["first", CANCEL] });
+    const { prompts, events } = createPrompts({
+      confirms: [true],
+      selects: ["first", CANCEL],
+    });
     const deps = buildDeps({
       prompts,
       codingTools: {
-        discover: async () => [
-          {
-            id: "claude",
-            label: "Claude Code",
-            command: "claude",
-            installed: true,
-            usable: true,
-          },
-          {
-            id: "codex",
-            label: "Codex",
-            command: "codex",
-            installed: true,
-            usable: true,
-          },
-        ],
-        smokeTest: async () => {
-          throw new Error("should not smoke test");
-        },
-        run: async () => {
-          throw new Error("should not run");
-        },
+        discover: () =>
+          Promise.resolve([
+            {
+              id: "claude",
+              label: "Claude Code",
+              command: "claude",
+              installed: true,
+              usable: true,
+            },
+            {
+              id: "codex",
+              label: "Codex",
+              command: "codex",
+              installed: true,
+              usable: true,
+            },
+          ]),
+        smokeTest: () => Promise.reject(new Error("should not smoke test")),
+        run: () => Promise.reject(new Error("should not run")),
       },
     });
 
@@ -349,7 +412,7 @@ describe("runClackWizard", () => {
     const dir = mkdtempSync(join(tmpdir(), "braintrust-setup-nogit-"));
     mkdirSync(join(dir, "child"), { recursive: true });
     const { prompts, events } = createPrompts({
-      confirms: [true],
+      confirms: [true, true],
       selects: ["first", "first", "production-done"],
     });
     const deps = buildDeps({ prompts, cwd: join(dir, "child") });
@@ -372,7 +435,7 @@ describe("runClackWizard", () => {
   it("supports manual instrumentation without creating local env files", async () => {
     const { prompts, events } = createPrompts({
       selects: ["manual", "production-later"],
-      confirms: [true],
+      confirms: [true, true],
     });
     const deps = buildDeps({ prompts });
 
@@ -402,12 +465,13 @@ describe("runClackWizard", () => {
     let clipboardText = "";
     const { prompts, events } = createPrompts({
       selects: ["own-agent", "clipboard", "production-done"],
-      confirms: [true],
+      confirms: [true, true],
     });
     const deps = buildDeps({
       prompts,
-      writeClipboard: async (text) => {
+      writeClipboard: (text) => {
         clipboardText = text;
+        return Promise.resolve();
       },
     });
 
@@ -431,7 +495,7 @@ describe("runClackWizard", () => {
   it("prints an interactive prompt for the user's own coding agent", async () => {
     const { prompts, events } = createPrompts({
       selects: ["own-agent", "terminal", "production-done"],
-      confirms: [true],
+      confirms: [true, true],
     });
     const deps = buildDeps({ prompts });
 
@@ -452,13 +516,11 @@ describe("runClackWizard", () => {
   it("prints the own-agent prompt when clipboard copy fails", async () => {
     const { prompts, events } = createPrompts({
       selects: ["own-agent", "clipboard", "production-done"],
-      confirms: [true],
+      confirms: [true, true],
     });
     const deps = buildDeps({
       prompts,
-      writeClipboard: async () => {
-        throw new Error("clipboard unavailable");
-      },
+      writeClipboard: () => Promise.reject(new Error("clipboard unavailable")),
     });
 
     await runClackWizard(deps);
@@ -476,71 +538,29 @@ describe("runClackWizard", () => {
     ).toBe(true);
   });
 
-  it("uses a configured coding tool without prompting", async () => {
-    const { prompts, events } = createPrompts({
-      selects: ["production-done"],
-    });
-    const deps = buildDeps({
-      prompts,
-      tool: "codex",
-      codingTools: {
-        discover: async () => [
-          {
-            id: "claude",
-            label: "Claude Code",
-            command: "claude",
-            installed: true,
-            usable: true,
-          },
-          {
-            id: "codex",
-            label: "Codex",
-            command: "codex",
-            installed: true,
-            usable: true,
-          },
-        ],
-        smokeTest: async ({ id }) => ({
-          exitCode: 0,
-          signal: null,
-          finalText: id === "codex" ? "BRAINTRUST_SETUP_TOOL_OK" : "wrong tool",
-        }),
-        run: async ({ id }) => ({
-          exitCode: 0,
-          signal: null,
-          finalText: `${id}\nINSTRUMENTATION_COMPLETE`,
-        }),
-      },
-    });
-
-    await runClackWizard(deps);
-    expect(events).not.toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
-    expect(events).not.toContain(`select:${TOOL_SELECT_MESSAGE}`);
-    expect(events).toContain(`select:${PRODUCTION_TOKEN_MESSAGE}`);
-    expect(events).toContain("info:Using Codex for instrumentation.");
-    expectEnvNoticeBeforeWrite(events);
-  });
-
   it("fails clearly when the selected tool smoke test fails", async () => {
-    const { prompts } = createPrompts({ selects: ["first", "first"] });
+    const { prompts } = createPrompts({
+      confirms: [true],
+      selects: ["first", "first"],
+    });
     const deps = buildDeps({
       prompts,
       codingTools: {
-        discover: async () => [
-          {
-            id: "claude",
-            label: "Claude Code",
-            command: "claude",
-            installed: true,
-            usable: true,
-          },
-        ],
-        smokeTest: async () => {
-          throw new Error("Claude Code could not complete a smoke prompt.");
-        },
-        run: async () => {
-          throw new Error("should not run");
-        },
+        discover: () =>
+          Promise.resolve([
+            {
+              id: "claude",
+              label: "Claude Code",
+              command: "claude",
+              installed: true,
+              usable: true,
+            },
+          ]),
+        smokeTest: () =>
+          Promise.reject(
+            new Error("Claude Code could not complete a smoke prompt."),
+          ),
+        run: () => Promise.reject(new Error("should not run")),
       },
     });
 

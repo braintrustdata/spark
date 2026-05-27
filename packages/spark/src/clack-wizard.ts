@@ -6,6 +6,7 @@ import pc from "picocolors";
 import {
   loginWithWizardSession as loginWithWizardSessionRequest,
   type WizardSessionCompleteResult,
+  type WizardSessionLoginUrlParams,
   type WizardSessionLogin,
 } from "./auth";
 import { BraintrustApiClient } from "./braintrust-api";
@@ -30,6 +31,7 @@ import { ClackToolRenderer } from "./tool-ui";
 import { gitignoreNote, terminalHyperlink } from "./wizard-utils";
 
 const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
+const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_DOCS_URL =
   "https://www.braintrust.dev/docs/instrument/trace-llm-calls";
 const ENV_BRAINTRUST_NOTICE =
@@ -155,7 +157,7 @@ function unwrap<T>(prompts: ClackWizardPrompts, value: T | symbol): T {
     prompts.cancel(WIZARD_CANCEL_MESSAGE);
     throw new WizardCancelledError();
   }
-  return value as T;
+  return value;
 }
 
 export type WizardResult = {
@@ -196,11 +198,11 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
           projectId: deps.options.projectId,
           apiUrl: deps.options.apiUrl,
         })
-      : await loginWithBrowser(deps);
+      : await loginWithBrowser(deps, {
+          authMode: (await hasBraintrustAccount(prompts)) ? "signin" : "signup",
+        });
 
-  const instrumentationMode = deps.options.tool
-    ? BUILT_IN_INSTRUMENTATION_CHOICE
-    : await selectInstrumentationMode(prompts);
+  const instrumentationMode = await selectInstrumentationMode(prompts);
 
   let envFilePath: string | undefined;
   if (instrumentationMode.id === "built-in") {
@@ -246,6 +248,9 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
 async function loginWithBrowser(
   deps: WizardDeps,
+  args: {
+    readonly authMode: WizardSessionLoginUrlParams["authMode"];
+  },
 ): Promise<WizardSessionCompleteResult> {
   const { prompts } = deps;
   const spinner = prompts.spinner();
@@ -253,21 +258,28 @@ async function loginWithBrowser(
 
   try {
     const session = await deps.loginWithWizardSession({
-      onLoginUrl: ({ loginUrl, verificationCode }) => {
-        prompts.log.info(
-          [
-            `Sign in: ${terminalHyperlink(loginUrl)}`,
-            "",
-            "If your browser didn't open automatically, open the link above to sign in.",
-            `Verification code: ${pc.reset(pc.bold(pc.whiteBright(verificationCode)))}`,
-            "",
-            "Choose the org and project you want to use; the wizard will resume here.",
-          ].join("\n"),
-        );
-        spinner.start("Waiting for login in browser...");
-        spinnerStarted = true;
+      loginUrlParams: {
+        orgId: deps.options.orgId,
+        projectId: deps.options.projId,
+        authMode: args.authMode,
       },
-      onTryOpenBrowser: (url) => deps.openBrowser(url),
+      events: {
+        onLoginUrl: ({ loginUrl, verificationCode }) => {
+          prompts.log.info(
+            [
+              `Sign in: ${terminalHyperlink(loginUrl)}`,
+              "",
+              "If your browser didn't open automatically, open the link above to sign in.",
+              `Verification code: ${pc.reset(pc.bold(pc.whiteBright(verificationCode)))}`,
+              "",
+              "Choose the org and project you want to use; the wizard will resume here.",
+            ].join("\n"),
+          );
+          spinner.start("Waiting for login in browser...");
+          spinnerStarted = true;
+        },
+        onTryOpenBrowser: (url) => deps.openBrowser(url),
+      },
     });
     if (spinnerStarted) {
       spinner.stop(
@@ -279,6 +291,18 @@ async function loginWithBrowser(
   } finally {
     if (spinnerStarted) spinner.stop("Browser setup stopped.");
   }
+}
+
+async function hasBraintrustAccount(
+  prompts: ClackWizardPrompts,
+): Promise<boolean> {
+  return unwrap(
+    prompts,
+    await prompts.confirm({
+      initialValue: true,
+      message: ACCOUNT_QUESTION,
+    }),
+  );
 }
 
 async function selectInstrumentationMode(
@@ -314,17 +338,6 @@ async function selectBuiltInCodingTool(
 ): Promise<CodingToolStatus> {
   const { prompts } = deps;
   const statuses = await deps.codingTools.discover();
-  if (deps.options.tool) {
-    const selected = statuses.find((status) => status.id === deps.options.tool);
-    if (!selected || !selected.usable) {
-      throw new Error(
-        selected
-          ? buildToolUnavailableMessage(selected)
-          : `Unknown coding tool: ${deps.options.tool}`,
-      );
-    }
-    return selected;
-  }
 
   const usable = statuses.filter((status) => status.usable);
   if (usable.length === 0) {
@@ -609,8 +622,16 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
     env,
     options: args.options,
     prompts: args.prompts,
-    loginWithWizardSession: (events) =>
-      loginWithWizardSessionRequest({ appUrl: args.options.appUrl, events }),
+    loginWithWizardSession: (loginArgs) =>
+      loginWithWizardSessionRequest({
+        appUrl: args.options.appUrl,
+        loginUrlParams: {
+          orgId: loginArgs.loginUrlParams?.orgId ?? args.options.orgId,
+          projectId: loginArgs.loginUrlParams?.projectId ?? args.options.projId,
+          authMode: loginArgs.loginUrlParams?.authMode,
+        },
+        events: loginArgs.events,
+      }),
     openBrowser,
     writeClipboard: (text) => clipboard.write(text),
     codingTools: {

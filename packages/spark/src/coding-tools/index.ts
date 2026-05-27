@@ -18,10 +18,6 @@ import type {
 const SMOKE_PROMPT = "Reply with exactly BRAINTRUST_SETUP_TOOL_OK.";
 const ADAPTERS: readonly Adapter[] = [claudeAdapter, codexAdapter];
 
-export function codingToolIds(): readonly CodingToolId[] {
-  return ADAPTERS.map((adapter) => adapter.id);
-}
-
 export function codingToolLabel(id: CodingToolId): string {
   return adapterFor(id).label;
 }
@@ -98,10 +94,6 @@ export async function runCodingTool(args: {
 export function buildToolUnavailableMessage(status: CodingToolStatus): string {
   if (!status.installed) return `${status.label} is not installed.`;
   return status.unavailableReason ?? `${status.label} is not usable.`;
-}
-
-export function parseCodingToolId(value: string): CodingToolId | undefined {
-  return value === "claude" || value === "codex" ? value : undefined;
 }
 
 export function buildClaudeCommandForTest(args: {

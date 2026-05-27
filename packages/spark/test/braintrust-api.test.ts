@@ -29,7 +29,7 @@ describe("BraintrustApiClient", () => {
           headers: { "Content-Type": "application/json" },
         }),
       );
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
     const api = new BraintrustApiClient("https://api.example", "tok");
 
     const project = await api.getProject("project/id");
@@ -65,7 +65,7 @@ describe("BraintrustApiClient", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response("boom", { status: 500 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    globalThis.fetch = fetchMock;
 
     const api = new BraintrustApiClient("https://api.example", "tok");
     await expect(api.getProject("p1")).rejects.toBeInstanceOf(

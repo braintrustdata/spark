@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import type { Buffer } from "node:buffer";
 import { platform } from "node:os";
 
 import type {
@@ -44,8 +45,12 @@ export function execCapture(
     });
     const stdout: string[] = [];
     const stderr: string[] = [];
-    child.stdout.on("data", (chunk) => stdout.push(chunk.toString("utf8")));
-    child.stderr.on("data", (chunk) => stderr.push(chunk.toString("utf8")));
+    child.stdout.on("data", (chunk: Buffer) =>
+      stdout.push(chunk.toString("utf8")),
+    );
+    child.stderr.on("data", (chunk: Buffer) =>
+      stderr.push(chunk.toString("utf8")),
+    );
     child.on("error", (error) =>
       resolve({
         exitCode: 1,
@@ -86,10 +91,10 @@ export function runToolCommand(
     const stderr: string[] = [];
     const finalParts: string[] = [];
 
-    child.stdout.on("data", (chunk) => {
+    child.stdout.on("data", (chunk: Buffer) => {
       stdoutLines.push(chunk.toString("utf8"));
     });
-    child.stderr.on("data", (chunk) => {
+    child.stderr.on("data", (chunk: Buffer) => {
       stderr.push(chunk.toString("utf8"));
     });
     child.on("error", (error) => {

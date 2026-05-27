@@ -31,15 +31,31 @@ export type WizardSessionEvents = {
   readonly onTryOpenBrowser: (url: string) => Promise<boolean>;
 };
 
+export type WizardSessionAuthMode = "signin" | "signup";
+
+export type WizardSessionLoginUrlParams = {
+  readonly orgId?: string | undefined;
+  readonly projectId?: string | undefined;
+  readonly authMode?: WizardSessionAuthMode | undefined;
+};
+
+export type WizardSessionLoginArgs = {
+  readonly events: WizardSessionEvents;
+  readonly loginUrlParams?: WizardSessionLoginUrlParams;
+};
+
 const POLL_INTERVAL_MS = 2000;
 const SLOW_DOWN_INCREMENT_MS = 1000;
 const MAX_POLL_INTERVAL_MS = 30_000;
 const POLL_HARD_TIMEOUT_MS = 3 * 60 * 1000;
 const CREATE_REQUEST_TIMEOUT_MS = 15_000;
 const POLL_REQUEST_TIMEOUT_MS = 30_000;
+const LOGIN_ORG_ID_PARAM = "org_id";
+const LOGIN_PROJECT_ID_PARAM = "project_id";
+const LOGIN_AUTH_PARAM = "auth";
 
 export type WizardSessionLogin = (
-  events: WizardSessionEvents,
+  args: WizardSessionLoginArgs,
 ) => Promise<WizardSessionCompleteResult>;
 
 export async function createWizardSession(
@@ -63,8 +79,19 @@ export async function createWizardSession(
 export function buildWizardSessionLoginUrl(
   appUrl: string,
   session: WizardSessionCreateResponse,
+  params?: WizardSessionLoginUrlParams,
 ): string {
-  return new URL(session.login_path, appUrl).toString();
+  const url = new URL(session.login_path, appUrl);
+  if (params?.orgId) {
+    url.searchParams.set(LOGIN_ORG_ID_PARAM, params.orgId);
+  }
+  if (params?.projectId) {
+    url.searchParams.set(LOGIN_PROJECT_ID_PARAM, params.projectId);
+  }
+  if (params?.authMode) {
+    url.searchParams.set(LOGIN_AUTH_PARAM, params.authMode);
+  }
+  return url.toString();
 }
 
 export async function pollWizardSession(args: {
@@ -92,7 +119,7 @@ export async function pollWizardSession(args: {
         interval + SLOW_DOWN_INCREMENT_MS,
         MAX_POLL_INTERVAL_MS,
       );
-      res.body?.cancel();
+      void res.body?.cancel();
       continue;
     }
     const json = (await res.json().catch(() => ({}))) as Record<
@@ -135,10 +162,15 @@ export async function pollWizardSession(args: {
 
 export async function loginWithWizardSession(args: {
   readonly appUrl: string;
+  readonly loginUrlParams?: WizardSessionLoginUrlParams;
   readonly events: WizardSessionEvents;
 }): Promise<WizardSessionCompleteResult> {
   const session = await createWizardSession(args.appUrl);
-  const loginUrl = buildWizardSessionLoginUrl(args.appUrl, session);
+  const loginUrl = buildWizardSessionLoginUrl(
+    args.appUrl,
+    session,
+    args.loginUrlParams,
+  );
   args.events.onLoginUrl({
     loginUrl,
     expiresAt: session.expires_at,

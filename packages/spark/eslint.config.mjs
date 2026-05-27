@@ -10,13 +10,26 @@ export default tseslint.config(
     ignores: ["dist/**", "coverage/**", "node_modules/**"],
   },
   js.configs.recommended,
-  ...tseslint.configs.recommended,
+  ...tseslint.configs.recommendedTypeChecked,
   {
     files: ["**/*.{js,mjs,ts,tsx}"],
     languageOptions: {
       ecmaVersion: "latest",
       globals: globals.node,
       sourceType: "module",
+    },
+  },
+  {
+    files: ["**/*.{js,mjs}"],
+    extends: [tseslint.configs.disableTypeChecked],
+  },
+  {
+    files: ["**/*.{ts,tsx}"],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir: import.meta.dirname,
+      },
     },
   },
   {
