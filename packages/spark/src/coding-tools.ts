@@ -2,7 +2,6 @@ export {
   buildClaudeCommandForTest,
   buildCodexCommandForTest,
   buildToolUnavailableMessage,
-  codingToolIds,
   codingToolLabel,
   discoverCodingTools,
   parseClaudeEventForTest,
@@ -10,7 +9,6 @@ export {
   parseClaudeStatusForTest,
   parseCodexEventForTest,
   parseCodexStatusForTest,
-  parseCodingToolId,
   runCodingTool,
   smokeTestCodingTool,
 } from "./coding-tools/index";

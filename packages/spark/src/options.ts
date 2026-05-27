@@ -1,20 +1,15 @@
 import yargs from "yargs/yargs";
 
 import pkg from "../package.json" with { type: "json" };
-import {
-  codingToolIds,
-  parseCodingToolId,
-  type CodingToolId,
-} from "./coding-tools";
 
 export type WizardOptions = {
   readonly apiUrl: string;
   readonly appUrl: string;
-  readonly caCertPath: string | undefined;
   readonly apiKey: string | undefined;
   readonly projectId: string | undefined;
+  readonly orgId: string | undefined;
+  readonly projId: string | undefined;
   readonly yolo: boolean;
-  readonly tool: CodingToolId | undefined;
 };
 
 const DEFAULT_API_URL = "https://api.braintrust.dev";
@@ -28,22 +23,21 @@ function buildParser(env: NodeJS.ProcessEnv) {
       type: "string",
       description: "Override API URL",
       default: env["BRAINTRUST_API_URL"] ?? DEFAULT_API_URL,
+      hidden: true,
     })
     .option("app-url", {
       type: "string",
       description: "Override app URL",
       default: env["BRAINTRUST_APP_URL"] ?? DEFAULT_APP_URL,
+      hidden: true,
     })
-    .option("ca-cert", {
+    .option("org-id", {
       type: "string",
-      description: "Path to PEM CA bundle",
-      default: env["BRAINTRUST_CA_CERT"] ?? env["SSL_CERT_FILE"],
+      description: "Braintrust org ID to pass to browser sign-in",
     })
-    .option("tool", {
+    .option("proj-id", {
       type: "string",
-      description: "Coding tool to run non-interactively",
-      choices: [...codingToolIds()],
-      default: env["BRAINTRUST_SETUP_TOOL"],
+      description: "Braintrust project ID to pass to browser sign-in",
     })
     .help()
     .alias("h", "help")
@@ -83,22 +77,14 @@ export async function parseArgs(
 
   const yolo = readEnvBool(env, "BRAINTRUST_SETUP_YOLO");
 
-  const toolRaw = (parsed["tool"] as string | undefined) || undefined;
-  const tool = toolRaw ? parseCodingToolId(toolRaw) : undefined;
-  if (toolRaw && !tool) {
-    throw new Error(
-      `Unknown coding tool "${toolRaw}". Known tools: ${codingToolIds().join(", ")}`,
-    );
-  }
-
   return {
-    apiUrl: stripTrailingSlash(parsed["api-url"] as string),
-    appUrl: stripTrailingSlash(parsed["app-url"] as string),
-    caCertPath: (parsed["ca-cert"] as string | undefined) || undefined,
+    apiUrl: stripTrailingSlash(parsed["api-url"]),
+    appUrl: stripTrailingSlash(parsed["app-url"]),
     apiKey,
     projectId,
+    orgId: parsed["org-id"],
+    projId: parsed["proj-id"],
     yolo,
-    tool,
   };
 }
 

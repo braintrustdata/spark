@@ -1,5 +1,3 @@
-import { spawnSync } from "node:child_process";
-
 import * as prompts from "@clack/prompts";
 
 import {
@@ -10,27 +8,6 @@ import {
 import { parseArgs } from "./options";
 
 const options = await parseArgs(process.argv.slice(2), process.env);
-
-// `NODE_EXTRA_CA_CERTS` is read once at Node startup, so we can't apply it
-// in-process. If --ca-cert (or BRAINTRUST_CA_CERT / SSL_CERT_FILE) was set
-// and the env var isn't already pointing at the same file, re-exec with it
-// applied. The guard env var prevents an infinite re-exec loop.
-const REEXEC_GUARD = "BT_WIZARD_REEXECED_FOR_CA";
-if (
-  options.caCertPath &&
-  process.env[REEXEC_GUARD] !== "1" &&
-  process.env["NODE_EXTRA_CA_CERTS"] !== options.caCertPath
-) {
-  const result = spawnSync(process.execPath, process.argv.slice(1), {
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      NODE_EXTRA_CA_CERTS: options.caCertPath,
-      [REEXEC_GUARD]: "1",
-    },
-  });
-  process.exit(result.status ?? 1);
-}
 
 const deps = buildDefaultDeps({
   options,
