@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildClaudeCommandForTest,
   buildCodexCommandForTest,
-  buildToolUnavailableMessage,
   parseClaudeEventForTest,
   parseClaudeEventsForTest,
   parseClaudeStatusForTest,
@@ -94,18 +93,6 @@ describe("coding tool status parsing", () => {
 
     expect(status.usable).toBe(false);
     expect(status.unavailableReason).toBe("Not logged in");
-  });
-
-  it("formats missing tool messages", () => {
-    expect(
-      buildToolUnavailableMessage({
-        id: "claude",
-        label: "Claude Code",
-        command: "claude",
-        installed: false,
-        usable: false,
-      }),
-    ).toBe("Claude Code is not installed.");
   });
 });
 

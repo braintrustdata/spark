@@ -1,7 +1,6 @@
 export {
   buildClaudeCommandForTest,
   buildCodexCommandForTest,
-  buildToolUnavailableMessage,
   codingToolLabel,
   discoverCodingTools,
   parseClaudeEventForTest,

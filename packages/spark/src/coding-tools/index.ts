@@ -91,11 +91,6 @@ export async function runCodingTool(args: {
   );
 }
 
-export function buildToolUnavailableMessage(status: CodingToolStatus): string {
-  if (!status.installed) return `${status.label} is not installed.`;
-  return status.unavailableReason ?? `${status.label} is not usable.`;
-}
-
 export function buildClaudeCommandForTest(args: {
   readonly commandPath: string;
   readonly cwd: string;
