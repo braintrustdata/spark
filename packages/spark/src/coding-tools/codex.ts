@@ -82,7 +82,7 @@ export function codexStatusFromResult(
     ...auth.stderr.split(/\r?\n/),
   ]
     .map((line) => line.trim())
-    .find((line) => /^Logged in(?:\s+using)?\b/i.test(line));
+    .find((line) => /^Logged in(?:\s+using)?\b/.test(line));
   if (!loginLine) {
     return {
       ...base,
@@ -97,8 +97,8 @@ export function codexStatusFromResult(
     usable: true,
     authMode:
       loginLine
-        .replace(/^Logged in using\s+/i, "")
-        .replace(/^Logged in\s*/i, "")
+        .replace(/^Logged in using\s+/, "")
+        .replace(/^Logged in\s*/, "")
         .trim() || undefined,
   };
 }

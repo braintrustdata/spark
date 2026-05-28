@@ -118,8 +118,6 @@ export const CLACK_WIZARD_COPY = {
         `${toolLabel} exited with code ${exitCode}.`,
       codingToolExited: (exitCode: number) =>
         `Coding tool exited with code ${exitCode}.`,
-      incompleteRenderer: "Instrumentation incomplete.",
-      incompleteWarning: "The coding tool reported incomplete instrumentation.",
       complete: "Instrumentation complete.",
       toolFinished: (toolLabel: string) => `${toolLabel} finished.`,
     },

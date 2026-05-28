@@ -237,7 +237,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     await confirmManualInstrumentation(prompts);
   }
 
-  const projectLogsUrl = `${deps.options.appUrl}/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
+  const projectLogsUrl = `${deps.options.appUrl}/app/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
   prompts.log.info(COPY.logs.projectLogsUrl(projectLogsUrl));
 
   await confirmProductionApiKey(prompts, envFilePath);
@@ -581,7 +581,6 @@ async function handleOwnAgentInstrumentation(
 ): Promise<void> {
   const { prompts } = deps;
   const promptText = `${renderPrompt({
-    interactive: true,
     orgName: args.org,
     projectName: args.project,
   })}${renderOwnAgentEnvFileContext(args.envFilePath)}`;
@@ -689,9 +688,7 @@ async function runInstrumentation(
   const { prompts } = deps;
   const resultFilePath = allocateResultFile();
   const promptText = renderPrompt({
-    interactive: false,
-    yolo: true,
-    resultFilePath,
+    includeResultFile: true,
     orgName: args.org,
     projectName: args.project,
   });
@@ -715,6 +712,10 @@ async function runInstrumentation(
     throw error;
   }
 
+  const tracePermalink =
+    readResultFile(resultFilePath) ??
+    extractTracePermalink(toolResult.finalText);
+
   if (toolResult.exitCode !== 0) {
     await renderer.error(
       COPY.instrumentation.builtIn.toolExited(toolLabel, toolResult.exitCode),
@@ -722,10 +723,7 @@ async function runInstrumentation(
     prompts.log.warn(
       COPY.instrumentation.builtIn.codingToolExited(toolResult.exitCode),
     );
-  } else if (toolResult.finalText.includes("INSTRUMENTATION_INCOMPLETE")) {
-    await renderer.error(COPY.instrumentation.builtIn.incompleteRenderer);
-    prompts.log.warn(COPY.instrumentation.builtIn.incompleteWarning);
-  } else if (toolResult.finalText.includes("INSTRUMENTATION_COMPLETE")) {
+  } else if (tracePermalink) {
     await renderer.success(COPY.instrumentation.builtIn.complete);
   } else {
     await renderer.success(
@@ -733,11 +731,7 @@ async function runInstrumentation(
     );
   }
 
-  return {
-    tracePermalink:
-      readResultFile(resultFilePath) ??
-      extractTracePermalink(toolResult.finalText),
-  };
+  return { tracePermalink };
 }
 
 export type DefaultDepsArgs = {

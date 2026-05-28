@@ -282,7 +282,7 @@ function buildDeps(args: {
           expect(env["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
           expect(env["BT_WIZARD_RESULT_FILE"]).toBeDefined();
           expect(env["BT_WIZARD_LANGUAGES"]).toBeUndefined();
-          expect(prompt).toContain("Unattended mode (YOLO)");
+          expect(prompt).toContain("Braintrust SDK Installation");
           onEvent({ type: "thinking", message: "Thinking..." });
           onEvent({
             type: "editing",
@@ -295,7 +295,7 @@ function buildDeps(args: {
             exitCode: 0,
             signal: null,
             finalText:
-              "Instrumentation done\nhttps://www.braintrust.dev/acme/p/demo/logs?r=abc\nINSTRUMENTATION_COMPLETE",
+              "Instrumentation done\nhttps://www.braintrust.dev/app/acme/p/demo/logs?r=abc",
           });
         },
       } satisfies CodingToolRuntime),
@@ -389,7 +389,7 @@ describe("runClackWizard", () => {
       ),
     ).toBe(false);
     expect(events).toContain(
-      "info:Check your Braintrust logs: https://app.test/acme/p/demo/logs",
+      "info:Check your Braintrust logs: https://app.test/app/acme/p/demo/logs",
     );
   });
 
@@ -905,10 +905,10 @@ describe("runClackWizard", () => {
       "confirm:Has your coding agent completed Braintrust instrumentation?",
     );
     expect(events).not.toContain("agent:Claude Code");
-    expect(clipboardText).toContain("Interactive mode");
+    expect(clipboardText).toContain("Braintrust SDK Installation");
     expect(clipboardText).toContain("Project name to set in code: demo");
     expect(clipboardText).toContain(".env.braintrust");
-    expect(clipboardText).not.toContain("This run is non-interactive");
+    expect(clipboardText).not.toContain("Interactive mode");
     expectEnvNoticeBeforeWrite(events);
   });
 
@@ -924,7 +924,7 @@ describe("runClackWizard", () => {
       events.some(
         (event) =>
           event.startsWith("message:Braintrust instrumentation prompt:") &&
-          event.includes("Interactive mode") &&
+          event.includes("Braintrust SDK Installation") &&
           event.includes(
             "https://www.braintrust.dev/docs/instrument/trace-llm-calls",
           ),
