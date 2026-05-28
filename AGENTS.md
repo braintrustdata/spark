@@ -47,6 +47,6 @@ Root-level scripts (`pnpm build`, `pnpm lint`, etc.) delegate to the packages th
 - Wizard tests live under `packages/spark/test/`.
 - The default CLI entrypoint is `packages/spark/src/cli.ts`; Rolldown emits `packages/spark/dist/cli.mjs`.
 - The beau CLI entrypoint is `packages/spark/src/beau/cli.tsx`; Rolldown emits `packages/spark/dist/cli.beau.js`.
-- Keep wizard text close to its calling flow; put reusable wizard helpers in utility modules.
+- Put all default Clack wizard user-facing copy in `packages/spark/src/clack-copy.ts`, organized by wizard flow. `clack-wizard.ts` should reference `CLACK_WIZARD_COPY` and keep only control-flow identifiers/sentinels inline.
 - `packages/spark/src/query-client.ts` owns QueryClient creation and should remain the central place for query defaults.
 - Do not add SEA packaging yet; the current build targets are JavaScript bundles.

@@ -44,6 +44,14 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
 
 const ENV_FILENAME = ".env.braintrust";
 
+export function envBraintrustPath(directory: string): string {
+  return join(directory, ENV_FILENAME);
+}
+
+export async function envBraintrustExists(directory: string): Promise<boolean> {
+  return pathExists(envBraintrustPath(directory));
+}
+
 export type EnvFileWriteResult = {
   readonly envFilePath: string;
   readonly gitignorePath: string;
@@ -52,15 +60,25 @@ export type EnvFileWriteResult = {
 };
 
 export async function writeEnvBraintrust(
-  gitRoot: string,
+  directory: string,
   apiKey: string,
 ): Promise<EnvFileWriteResult> {
-  const envFilePath = join(gitRoot, ENV_FILENAME);
+  const envFilePath = envBraintrustPath(directory);
   await writeFile(envFilePath, `BRAINTRUST_API_KEY=${apiKey}\n`, {
     mode: 0o600,
   });
 
-  const gitignorePath = join(gitRoot, ".gitignore");
+  const gitignoreResult = await ensureEnvBraintrustIgnored(directory);
+  return {
+    envFilePath,
+    ...gitignoreResult,
+  };
+}
+
+export async function ensureEnvBraintrustIgnored(
+  directory: string,
+): Promise<Omit<EnvFileWriteResult, "envFilePath">> {
+  const gitignorePath = join(directory, ".gitignore");
   const existing = (await pathExists(gitignorePath))
     ? await readFile(gitignorePath, "utf8")
     : "";
@@ -68,7 +86,6 @@ export async function writeEnvBraintrust(
   const alreadyCovered = gitignoreCovers(existing, ENV_FILENAME);
   if (alreadyCovered) {
     return {
-      envFilePath,
       gitignorePath,
       addedToGitignore: false,
       alreadyCovered: true,
@@ -78,7 +95,6 @@ export async function writeEnvBraintrust(
   const sep = existing.length === 0 || existing.endsWith("\n") ? "" : "\n";
   await writeFile(gitignorePath, `${existing}${sep}${ENV_FILENAME}\n`);
   return {
-    envFilePath,
     gitignorePath,
     addedToGitignore: true,
     alreadyCovered: false,

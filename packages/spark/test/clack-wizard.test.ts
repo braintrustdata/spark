@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +16,12 @@ import {
   type WizardSessionLoginArgs,
   type WizardSessionLogin,
 } from "../src/auth";
+import {
+  type BraintrustCliConfigureArgs,
+  type BraintrustCliDiscovery,
+  type BraintrustCliContext,
+  type BraintrustCliRuntime,
+} from "../src/braintrust-cli";
 import {
   type CodingToolRuntime,
   type ClackWizardPrompts,
@@ -23,11 +35,16 @@ const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
 const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_MODE_MESSAGE =
   "How do you want to add Braintrust instrumentation?";
+const CLI_INSTALL_MESSAGE = "Would you like to install the Braintrust CLI?";
+const CLI_UPDATE_MESSAGE =
+  "Braintrust CLI is already installed (bt 0.10.0). Update it to the latest version?";
 const TOOL_SELECT_MESSAGE = "Which coding agent should Braintrust Setup use?";
 const OWN_AGENT_DELIVERY_MESSAGE =
   "How should Braintrust Setup deliver the instrumentation prompt?";
 const ENV_BRAINTRUST_NOTICE =
   "The wizard will now create a .env.braintrust file that is used to authenticate your application to Braintrust. It will be used for local testing.";
+const ENV_BRAINTRUST_REPLACE_QUESTION =
+  ".env.braintrust already exists. Replace it with this project's Braintrust API key?";
 
 const CANCEL = Symbol("cancel");
 
@@ -206,6 +223,7 @@ function buildDeps(args: {
   readonly loginWithWizardSession?: WizardSessionLogin;
   readonly cwd?: string;
   readonly codingTools?: CodingToolRuntime;
+  readonly braintrustCli?: BraintrustCliRuntime;
   readonly writeClipboard?: (text: string) => Promise<void>;
 }): WizardDeps {
   const cwd = args.cwd ?? createGitTempDir();
@@ -239,6 +257,7 @@ function buildDeps(args: {
     loginWithWizardSession: stubLogin,
     openBrowser: () => Promise.resolve(true),
     writeClipboard: args.writeClipboard ?? (() => Promise.resolve()),
+    braintrustCli: args.braintrustCli ?? createBraintrustCliStub(),
     codingTools:
       args.codingTools ??
       ({
@@ -283,10 +302,39 @@ function buildDeps(args: {
   };
 }
 
+function createBraintrustCliStub(
+  args: {
+    readonly discoveries?: readonly BraintrustCliDiscovery[];
+    readonly install?: () => Promise<void>;
+    readonly update?: (commandPath: string) => Promise<void>;
+    readonly status?: (commandPath: string) => Promise<BraintrustCliContext>;
+    readonly loginAndSwitch?: (
+      commandPath: string,
+      args: BraintrustCliConfigureArgs,
+    ) => Promise<void>;
+  } = {},
+): BraintrustCliRuntime {
+  let discoveryIndex = 0;
+  const discoveries = args.discoveries ?? [{ installed: false }];
+
+  return {
+    discover: () => {
+      const discovery =
+        discoveries[Math.min(discoveryIndex, discoveries.length - 1)]!;
+      discoveryIndex += 1;
+      return Promise.resolve(discovery);
+    },
+    install: args.install ?? (() => Promise.resolve()),
+    update: args.update ?? (() => Promise.resolve()),
+    status: args.status ?? (() => Promise.resolve({})),
+    loginAndSwitch: args.loginAndSwitch ?? (() => Promise.resolve()),
+  };
+}
+
 describe("runClackWizard", () => {
   it("walks through the happy path with one usable coding tool", async () => {
     const { prompts, events } = createPrompts({
-      confirms: [true],
+      confirms: [true, false],
       selects: ["first", "first", "production-done"],
     });
     const deps = buildDeps({ prompts });
@@ -299,6 +347,7 @@ describe("runClackWizard", () => {
     expect(events[0]).toBe(`intro:${WIZARD_INTRO_TITLE}`);
     expect(events).toContain("note:Setup plan");
     expect(events).toContain(`confirm:${ACCOUNT_QUESTION}`);
+    expect(events).toContain(`confirm:${CLI_INSTALL_MESSAGE}`);
     expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
     expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
     expect(events.some((event) => event.startsWith("info:Sign in:"))).toBe(
@@ -332,6 +381,9 @@ describe("runClackWizard", () => {
     );
     expectEnvNoticeBeforeWrite(events);
     expect(
+      events.indexOf(`note.message:${ENV_BRAINTRUST_NOTICE}`),
+    ).toBeLessThan(events.indexOf(`confirm:${CLI_INSTALL_MESSAGE}`));
+    expect(
       events.some((event) =>
         event.startsWith("info:Saved instrumentation prompt"),
       ),
@@ -350,7 +402,7 @@ describe("runClackWizard", () => {
     for (const { answer, expectedAuthMode } of cases) {
       let authMode: string | undefined;
       const { prompts } = createPrompts({
-        confirms: [answer, true],
+        confirms: [answer, false, true],
         selects: ["manual", "production-done"],
       });
       const deps = buildDeps({
@@ -374,9 +426,375 @@ describe("runClackWizard", () => {
     }
   });
 
+  it("asks before replacing an existing local env file", async () => {
+    const cwd = createGitTempDir();
+    const envFilePath = join(cwd, ".env.braintrust");
+    writeFileSync(envFilePath, "BRAINTRUST_API_KEY=old\n");
+    const { prompts, events } = createPrompts({
+      confirms: [true, true, false, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({ prompts, cwd });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(`confirm:${ENV_BRAINTRUST_REPLACE_QUESTION}`);
+    expect(readFileSync(envFilePath, "utf8")).toBe(
+      "BRAINTRUST_API_KEY=bt-secret-key\n",
+    );
+  });
+
+  it("writes local env files in the cwd instead of the git root", async () => {
+    const root = createGitTempDir();
+    const cwd = join(root, "app", "service");
+    mkdirSync(cwd, { recursive: true });
+    const { prompts } = createPrompts({
+      confirms: [true, false, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({ prompts, cwd });
+
+    await runClackWizard(deps);
+
+    expect(readFileSync(join(cwd, ".env.braintrust"), "utf8")).toBe(
+      "BRAINTRUST_API_KEY=bt-secret-key\n",
+    );
+    expect(readFileSync(join(cwd, ".gitignore"), "utf8")).toBe(
+      ".env.braintrust\n",
+    );
+    expect(existsSync(join(root, ".env.braintrust"))).toBe(false);
+    expect(existsSync(join(root, ".gitignore"))).toBe(false);
+  });
+
+  it("keeps an existing local env file when replacement is declined", async () => {
+    const cwd = createGitTempDir();
+    const envFilePath = join(cwd, ".env.braintrust");
+    writeFileSync(envFilePath, "BRAINTRUST_API_KEY=old\n");
+    const { prompts, events } = createPrompts({
+      confirms: [true, false, false, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({ prompts, cwd });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(`confirm:${ENV_BRAINTRUST_REPLACE_QUESTION}`);
+    expect(
+      events.some(
+        (event) =>
+          event.startsWith("info:Kept existing ") &&
+          event.endsWith("/.env.braintrust unchanged."),
+      ),
+    ).toBe(true);
+    expect(events).toContain("info:Added .env.braintrust to .gitignore.");
+    expect(readFileSync(envFilePath, "utf8")).toBe("BRAINTRUST_API_KEY=old\n");
+    expect(readFileSync(join(cwd, ".gitignore"), "utf8")).toBe(
+      ".env.braintrust\n",
+    );
+  });
+
+  it("installs and configures the Braintrust CLI when missing and accepted", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, true, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: false },
+          {
+            installed: true,
+            commandPath: "/usr/local/bin/bt",
+            version: "bt 0.10.0",
+          },
+        ],
+        install: () => {
+          calls.push("install");
+          return Promise.resolve();
+        },
+        status: (commandPath) => {
+          calls.push(`status:${commandPath}`);
+          return Promise.resolve({});
+        },
+        loginAndSwitch: (commandPath, args) => {
+          calls.push(
+            `login:${commandPath}:${args.apiKey}:${args.apiUrl}:${args.appUrl}:${args.orgName}:${args.projectName}`,
+          );
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(`confirm:${CLI_INSTALL_MESSAGE}`);
+    expect(events).toContain("success:Installed Braintrust CLI.");
+    expect(events).toContain("success:Configured Braintrust CLI.");
+    expect(calls).toEqual([
+      "install",
+      "status:/usr/local/bin/bt",
+      "login:/usr/local/bin/bt:bt-secret-key:https://api.test:https://app.test:acme:demo",
+    ]);
+  });
+
+  it("skips Braintrust CLI install and configuration when declined", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, false, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        install: () => {
+          calls.push("install");
+          return Promise.resolve();
+        },
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(`confirm:${CLI_INSTALL_MESSAGE}`);
+    expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
+    expect(calls).toEqual([]);
+  });
+
+  it("continues when Braintrust CLI install fails", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, true, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        install: () => Promise.reject(new Error("install failed")),
+        status: () => {
+          calls.push("status");
+          return Promise.resolve({});
+        },
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(
+      events.some((event) =>
+        event.startsWith(
+          "warn:Could not install Braintrust CLI: install failed",
+        ),
+      ),
+    ).toBe(true);
+    expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
+    expect(calls).toEqual([]);
+  });
+
+  it("updates and configures an installed Braintrust CLI when accepted", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, true, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.1" },
+        ],
+        update: (commandPath) => {
+          calls.push(`update:${commandPath}`);
+          return Promise.resolve();
+        },
+        status: (commandPath) => {
+          calls.push(`status:${commandPath}`);
+          return Promise.resolve({});
+        },
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(`confirm:${CLI_UPDATE_MESSAGE}`);
+    expect(events).toContain("success:Updated Braintrust CLI.");
+    expect(events).toContain("success:Configured Braintrust CLI.");
+    expect(calls).toEqual(["update:/bin/bt", "status:/bin/bt", "login"]);
+  });
+
+  it("still configures an installed Braintrust CLI when update fails", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, true, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        update: () => Promise.reject(new Error("update failed")),
+        status: () => {
+          calls.push("status");
+          return Promise.resolve({});
+        },
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(
+      events.some((event) =>
+        event.startsWith("warn:Could not update Braintrust CLI: update failed"),
+      ),
+    ).toBe(true);
+    expect(calls).toEqual(["status", "login"]);
+  });
+
+  it("configures an installed Braintrust CLI with matching context without asking to switch", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, false, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        status: () =>
+          Promise.resolve({ profile: "acme", org: "acme", project: "demo" }),
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(`confirm:${CLI_UPDATE_MESSAGE}`);
+    expect(
+      events.some((event) =>
+        event.startsWith("confirm:Braintrust CLI is currently configured for"),
+      ),
+    ).toBe(false);
+    expect(calls).toEqual(["login"]);
+  });
+
+  it("leaves a different Braintrust CLI context untouched when switch is declined", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, false, false, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        status: () =>
+          Promise.resolve({ profile: "work", org: "other", project: "old" }),
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(
+      "confirm:Braintrust CLI is currently configured for work (other/old). Switch it to acme (acme/demo)?",
+    );
+    expect(events).toContain(
+      "info:Leaving existing Braintrust CLI context unchanged.",
+    );
+    expect(calls).toEqual([]);
+  });
+
+  it("switches a different Braintrust CLI context when accepted", async () => {
+    const calls: string[] = [];
+    const { prompts } = createPrompts({
+      confirms: [true, false, true, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        status: () =>
+          Promise.resolve({ profile: "work", org: "other", project: "old" }),
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(calls).toEqual(["login"]);
+  });
+
+  it("does not configure the Braintrust CLI when status inspection fails", async () => {
+    const calls: string[] = [];
+    const { prompts, events } = createPrompts({
+      confirms: [true, false, true],
+      selects: ["manual", "production-done"],
+    });
+    const deps = buildDeps({
+      prompts,
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        status: () => Promise.reject(new Error("status failed")),
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(
+      events.some((event) =>
+        event.startsWith(
+          "warn:Could not inspect Braintrust CLI status; leaving existing CLI context unchanged. status failed",
+        ),
+      ),
+    ).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
   it("cancels cleanly when the user aborts the tool select", async () => {
     const { prompts, events } = createPrompts({
-      confirms: [true],
+      confirms: [true, false],
       selects: ["first", CANCEL],
     });
     const deps = buildDeps({
@@ -412,7 +830,7 @@ describe("runClackWizard", () => {
     const dir = mkdtempSync(join(tmpdir(), "braintrust-setup-nogit-"));
     mkdirSync(join(dir, "child"), { recursive: true });
     const { prompts, events } = createPrompts({
-      confirms: [true, true],
+      confirms: [true, true, false],
       selects: ["first", "first", "production-done"],
     });
     const deps = buildDeps({ prompts, cwd: join(dir, "child") });
@@ -432,10 +850,10 @@ describe("runClackWizard", () => {
     expect(events).toContain(`cancel:${WIZARD_CANCEL_MESSAGE}`);
   });
 
-  it("supports manual instrumentation without creating local env files", async () => {
+  it("supports manual instrumentation after creating local env files", async () => {
     const { prompts, events } = createPrompts({
       selects: ["manual", "production-later"],
-      confirms: [true, true],
+      confirms: [true, false, true],
     });
     const deps = buildDeps({ prompts });
 
@@ -456,16 +874,18 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "warn:Do not forget to add BRAINTRUST_API_KEY to production. Braintrust tracing will not work in production without it.",
     );
-    expect(events).not.toContain(`note.message:${ENV_BRAINTRUST_NOTICE}`);
-    expect(existsSync(join(deps.cwd, ".env.braintrust"))).toBe(false);
-    expect(existsSync(join(deps.cwd, ".gitignore"))).toBe(false);
+    expect(events).toContain(`note.message:${ENV_BRAINTRUST_NOTICE}`);
+    expect(readFileSync(join(deps.cwd, ".env.braintrust"), "utf8")).toBe(
+      "BRAINTRUST_API_KEY=bt-secret-key\n",
+    );
+    expect(existsSync(join(deps.cwd, ".gitignore"))).toBe(true);
   });
 
   it("copies an interactive prompt for the user's own coding agent", async () => {
     let clipboardText = "";
     const { prompts, events } = createPrompts({
       selects: ["own-agent", "clipboard", "production-done"],
-      confirms: [true, true],
+      confirms: [true, false, true],
     });
     const deps = buildDeps({
       prompts,
@@ -495,7 +915,7 @@ describe("runClackWizard", () => {
   it("prints an interactive prompt for the user's own coding agent", async () => {
     const { prompts, events } = createPrompts({
       selects: ["own-agent", "terminal", "production-done"],
-      confirms: [true, true],
+      confirms: [true, false, true],
     });
     const deps = buildDeps({ prompts });
 
@@ -516,7 +936,7 @@ describe("runClackWizard", () => {
   it("prints the own-agent prompt when clipboard copy fails", async () => {
     const { prompts, events } = createPrompts({
       selects: ["own-agent", "clipboard", "production-done"],
-      confirms: [true, true],
+      confirms: [true, false, true],
     });
     const deps = buildDeps({
       prompts,
@@ -540,7 +960,7 @@ describe("runClackWizard", () => {
 
   it("fails clearly when the selected tool smoke test fails", async () => {
     const { prompts } = createPrompts({
-      confirms: [true],
+      confirms: [true, false],
       selects: ["first", "first"],
     });
     const deps = buildDeps({
