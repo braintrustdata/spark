@@ -1,0 +1,40 @@
+name: Build binary
+description: Build, package, and upload one braintrust-setup binary artifact.
+inputs:
+  archive:
+    description: Archive format to produce.
+    required: true
+  artifact:
+    description: Artifact name without archive extension.
+    required: true
+  ext:
+    description: Binary extension for the target platform.
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Build SEA binary
+      shell: bash
+      run: pnpm build:sea
+
+    - name: Package binary
+      shell: bash
+      working-directory: dist-sea
+      run: |
+        bin="braintrust-setup${{ inputs.ext }}"
+        out="${{ inputs.artifact }}.${{ inputs.archive }}"
+        if [ "${{ inputs.archive }}" = "zip" ]; then
+          7z a "$out" "$bin"
+        else
+          chmod +x "$bin"
+          tar -czf "$out" "$bin"
+        fi
+
+    - name: Upload archive
+      # actions/upload-artifact@v4.4.3
+      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+      with:
+        name: ${{ inputs.artifact }}
+        path: dist-sea/${{ inputs.artifact }}.${{ inputs.archive }}
+        if-no-files-found: error
