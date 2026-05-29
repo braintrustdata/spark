@@ -88,22 +88,12 @@ export function claudeStatusFromResult(
   const loggedIn = parsed["loggedIn"] === true;
   const authMethod = stringField(parsed, "authMethod");
   const subscriptionType = stringField(parsed, "subscriptionType");
-  const tokenBased = authMethod !== undefined && authMethod !== "claude.ai";
   if (!loggedIn) {
     return {
       ...base,
       usable: false,
       authMode: authMethod,
       unavailableReason: "Claude Code is not logged in.",
-    };
-  }
-  if (!tokenBased && !subscriptionType) {
-    return {
-      ...base,
-      usable: false,
-      authMode: authMethod,
-      unavailableReason:
-        "Claude Code does not report an active subscription or token.",
     };
   }
   return {
