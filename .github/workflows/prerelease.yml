@@ -143,8 +143,11 @@ jobs:
           TARGET_SHA: ${{ needs.metadata.outputs.target_sha }}
         shell: bash
         run: |
+          release_notes="$(printf '## Run this release\n\n```sh\ncurl -fsSL https://braintrust.dev/wizard/setup.sh | sh -s -- %s\n```' "$TAG")"
+
           gh release create "$TAG" \
             --target "$TARGET_SHA" \
+            --notes "$release_notes" \
             --generate-notes \
             --prerelease \
             --latest=false \
