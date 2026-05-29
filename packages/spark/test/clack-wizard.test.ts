@@ -214,6 +214,7 @@ function createPrompts(inputs: FakePromptInputs) {
       success: (m) => events.push(`success:${m}`),
       message: (m) => events.push(`message:${m}`),
     },
+    writeRaw: (m) => events.push(`writeRaw:${m}`),
   };
 
   return { prompts, events };
@@ -957,7 +958,8 @@ describe("runClackWizard", () => {
     expect(
       events.some(
         (event) =>
-          event.startsWith("message:Braintrust instrumentation prompt:") &&
+          event.startsWith("writeRaw:") &&
+          event.includes("Braintrust instrumentation prompt:") &&
           event.includes(
             "https://www.braintrust.dev/docs/tracing-quickstart",
           ) &&
@@ -994,8 +996,10 @@ describe("runClackWizard", () => {
       ),
     ).toBe(true);
     expect(
-      events.some((event) =>
-        event.startsWith("message:Braintrust instrumentation prompt:"),
+      events.some(
+        (event) =>
+          event.startsWith("writeRaw:") &&
+          event.includes("Braintrust instrumentation prompt:"),
       ),
     ).toBe(true);
   });

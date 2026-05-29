@@ -151,6 +151,7 @@ export type ClackWizardPrompts = {
     readonly success: (message: string) => void;
     readonly message: (message: string) => void;
   };
+  readonly writeRaw: (message: string) => void;
 };
 
 export type WizardDeps = {
@@ -672,8 +673,8 @@ function printInstrumentationPrompt(
   prompts: ClackWizardPrompts,
   promptText: string,
 ): void {
-  prompts.log.message(
-    [COPY.instrumentation.ownAgent.promptHeader, "", promptText].join("\n"),
+  prompts.writeRaw(
+    `\n${COPY.instrumentation.ownAgent.promptHeader}\n\n${promptText}\n\n`,
   );
 }
 
