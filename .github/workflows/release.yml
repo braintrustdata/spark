@@ -1,13 +1,10 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - "v*.*.*"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "Release tag (for example v0.1.1)"
+      version:
+        description: "Stable version without a leading v, for example 0.0.3"
         required: true
         type: string
 
@@ -15,39 +12,177 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-v${{ inputs.version }}
   cancel-in-progress: false
 
-env:
-  TAG: ${{ inputs.tag || github.ref_name }}
-
 jobs:
+  prepare:
+    name: Prepare release commit
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      branch: ${{ steps.validate.outputs.branch }}
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+      release_sha: ${{ steps.commit.outputs.release_sha }}
+      tag: ${{ steps.validate.outputs.tag }}
+      version: ${{ steps.validate.outputs.version }}
+    steps:
+      - name: Checkout main
+        # actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: main
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: validate
+        name: Validate release input
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_VERSION: ${{ inputs.version }}
+          WORKFLOW_REF: ${{ github.ref }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "$WORKFLOW_REF" != "refs/heads/main" ]; then
+            echo "Stable releases must be dispatched from main; got $WORKFLOW_REF" >&2
+            exit 1
+          fi
+
+          if [[ ! "$INPUT_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Version must be stable semver without a leading v; got: $INPUT_VERSION" >&2
+            exit 1
+          fi
+
+          file=packages/spark/package.json
+          current="$(jq -r .version "$file")"
+          if [[ ! "$current" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Current package version must be stable semver; got: $current" >&2
+            exit 1
+          fi
+
+          IFS=. read -r next_major next_minor next_patch <<< "$INPUT_VERSION"
+          IFS=. read -r current_major current_minor current_patch <<< "$current"
+          if (( next_major < current_major )) ||
+            (( next_major == current_major && next_minor < current_minor )) ||
+            (( next_major == current_major && next_minor == current_minor && next_patch <= current_patch )); then
+            echo "Version $INPUT_VERSION must be greater than current version $current" >&2
+            exit 1
+          fi
+
+          tag="v${INPUT_VERSION}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag $tag already exists" >&2
+            exit 1
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub Release $tag already exists" >&2
+            exit 1
+          fi
+
+          timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          branch="release/${tag}-${timestamp}"
+
+          echo "branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$INPUT_VERSION" >> "$GITHUB_OUTPUT"
+
+      - id: commit
+        name: Create release branch and commit
+        env:
+          BRANCH: ${{ steps.validate.outputs.branch }}
+          VERSION: ${{ steps.validate.outputs.version }}
+          TAG: ${{ steps.validate.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+
+          tmp="$(mktemp)"
+          jq --arg version "$VERSION" '.version = $version' packages/spark/package.json > "$tmp"
+          mv "$tmp" packages/spark/package.json
+
+          git add packages/spark/package.json
+          git commit -m "Release $TAG"
+
+          release_sha="$(git rev-parse HEAD)"
+          git push origin "HEAD:$BRANCH"
+
+          echo "release_sha=$release_sha" >> "$GITHUB_OUTPUT"
+
+      - id: pr
+        name: Open release PR
+        env:
+          BRANCH: ${{ steps.validate.outputs.branch }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.validate.outputs.tag }}
+          VERSION: ${{ steps.validate.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh pr create \
+            --base main \
+            --head "$BRANCH" \
+            --title "Release $TAG" \
+            --body "Bump braintrust-setup to $VERSION for $TAG."
+
+          pr_number="$(gh pr view "$BRANCH" --json number --jq .number)"
+          echo "pr_number=$pr_number" >> "$GITHUB_OUTPUT"
+
+  verify:
+    name: Verify release commit
+    needs: prepare
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout release commit
+        # actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.prepare.outputs.release_sha }}
+
+      - uses: ./.github/actions/setup
+
+      - name: Build CLIs
+        run: pnpm build
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Run ESLint
+        run: pnpm lint
+
+      - name: Check formatting
+        run: pnpm format:check
+
   build:
     name: Build binaries
+    needs: prepare
     uses: ./.github/workflows/build-binaries.yml
+    with:
+      ref: ${{ needs.prepare.outputs.release_sha }}
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs:
+      - prepare
+      - verify
+      - build
     runs-on: ubuntu-24.04
     environment: release
     permissions:
       contents: write
+      pull-requests: write
     steps:
-      - name: Validate tag
-        shell: bash
-        run: |
-          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "Tag must match v<major>.<minor>.<patch>; got: $TAG" >&2
-            exit 1
-          fi
-
-      - name: Checkout
-        # actions/checkout@v6.0.2
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
-        with:
-          ref: ${{ env.TAG }}
-
       - name: Download binaries
         # actions/download-artifact@v4.1.8
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
@@ -63,5 +198,31 @@ jobs:
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          TAG: ${{ needs.prepare.outputs.tag }}
         shell: bash
-        run: gh release create "$TAG" --generate-notes release-assets/*
+        run: |
+          gh release create "$TAG" \
+            --target "$RELEASE_SHA" \
+            --generate-notes \
+            --latest \
+            release-assets/*
+
+      - name: Enable auto-merge for release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ needs.prepare.outputs.pr_number }}
+          RELEASE_SHA: ${{ needs.prepare.outputs.release_sha }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          gh pr merge "$PR_NUMBER" \
+            --auto \
+            --squash \
+            --delete-branch \
+            --match-head-commit "$RELEASE_SHA" \
+            --subject "Release $TAG" \
+            --body "Bump braintrust-setup to $VERSION."
