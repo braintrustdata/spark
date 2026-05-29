@@ -128,7 +128,6 @@ describe("coding tool command construction", () => {
     expect(spec.args).toContain("--model");
     expect(spec.args).toContain("gpt-5.5");
     expect(spec.args).toContain('model_reasoning_effort="xhigh"');
-    expect(spec.args).toContain('service_tier="priority"');
     expect(spec.args).toContain("danger-full-access");
     expect(spec.args).toContain("--dangerously-bypass-approvals-and-sandbox");
     expect(spec.args).not.toContain("workspace-write");

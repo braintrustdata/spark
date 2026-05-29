@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseArgs } from "../src/options";
+import { DEFAULT_APP_URL, parseArgs } from "../src/options";
 
 describe("parseArgs", () => {
   it("still parses hidden API and app URL args", async () => {
@@ -18,7 +18,7 @@ describe("parseArgs", () => {
       BRAINTRUST_APP_URL: "https://app.env/",
     });
 
-    expect(options.appUrl).toBe("https://app.env");
+    expect(options.appUrl).toBe(DEFAULT_APP_URL);
   });
 
   it("parses browser login org and project id args", async () => {

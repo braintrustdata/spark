@@ -288,7 +288,7 @@ function buildDeps(args: {
             'For the SDK initialization configure the project name "demo".',
           );
           expect(prompt).toContain(
-            "Do not run the application code, just do code changes to instrument the application.",
+            "Do not run application code, just do code changes to instrument the application.",
           );
           expect(prompt).toContain("Do not use the Braintrust CLI (`bt`).");
           expect(prompt).not.toContain("Unattended mode (YOLO)");
