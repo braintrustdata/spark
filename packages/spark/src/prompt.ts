@@ -9,7 +9,7 @@ export function renderPrompt(opts: {
 - Look at the current workspace and instrument it with Braintrust tracing using the right Braintrust SDK(s).
 - Don't add any evals or anything other than tracing.
 - Exclusively follow the docs at https://www.braintrust.dev/docs/tracing-quickstart. Do not concern yourself with the braintrust setup script. You are running as part of that script.
-- You can assume that there is a \`.env.braintrust\` file at the current working directory. In this file there is a \`BRAINTRUST_API_KEY\` environment variable with a valid API key for the Braintrust organization we want to send data to. Assume that the Braintrust SDKs are able to pick up \`.env.braintrust\` automatically as long as it is run with a working directory in a directory below or with the file. Don't read \`.env.braintrust\` and never put the actual API key value into code.
+- You can assume that there are \`.env.braintrust\` and \`.braintrust.json\` files at the current working directory. These files contain a \`BRAINTRUST_API_KEY\` token with a valid API key for the Braintrust organization we want to send data to. Assume that the Braintrust SDKs are able to pick up the local token automatically as long as they run with a working directory in a directory below or with these files. Don't read either file and never put the actual API key value into code.
 - In terms of instrumentation, always prefer adding auto-instrumentation over manual wrappers.
 - For the SDK initialization configure the project name "${opts.projectName || ""}".
 - Do not run application code, just do code changes to instrument the application.
