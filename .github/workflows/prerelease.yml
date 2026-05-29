@@ -1,0 +1,151 @@
+name: Pre-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: "Optional branch, tag, or commit SHA to release. Defaults to the selected workflow ref."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prerelease-${{ inputs.target_ref || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  metadata:
+    name: Prepare pre-release metadata
+    runs-on: ubuntu-24.04
+    outputs:
+      package_version: ${{ steps.metadata.outputs.package_version }}
+      short_sha: ${{ steps.metadata.outputs.short_sha }}
+      tag: ${{ steps.metadata.outputs.tag }}
+      target_sha: ${{ steps.metadata.outputs.target_sha }}
+    steps:
+      - name: Checkout target ref
+        # actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ inputs.target_ref || github.sha }}
+          fetch-depth: 0
+          fetch-tags: true
+
+      - id: metadata
+        name: Read package version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_sha="$(git rev-parse HEAD)"
+          short_sha="$(git rev-parse --short=7 HEAD)"
+          package_version="$(jq -r .version packages/spark/package.json)"
+
+          if [[ ! "$package_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "Package version must be stable semver; got: $package_version" >&2
+            exit 1
+          fi
+
+          tag="v${package_version}-pre.${short_sha}"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "Tag $tag already exists" >&2
+            exit 1
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "GitHub Release $tag already exists" >&2
+            exit 1
+          fi
+
+          echo "package_version=$package_version" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "target_sha=$target_sha" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build binary (${{ matrix.artifact }})
+    needs: metadata
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: braintrust-setup-linux-x64
+            ext: ""
+            archive: tar.gz
+          - os: ubuntu-24.04-arm
+            artifact: braintrust-setup-linux-arm64
+            ext: ""
+            archive: tar.gz
+          - os: macos-26
+            artifact: braintrust-setup-darwin-arm64
+            ext: ""
+            archive: tar.gz
+          - os: macos-15-intel
+            artifact: braintrust-setup-darwin-x64
+            ext: ""
+            archive: tar.gz
+          - os: windows-2022
+            artifact: braintrust-setup-windows-x64
+            ext: ".exe"
+            archive: zip
+          - os: windows-11-arm
+            artifact: braintrust-setup-windows-arm64
+            ext: ".exe"
+            archive: zip
+    steps:
+      - name: Checkout target commit
+        # actions/checkout@v6.0.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+        with:
+          ref: ${{ needs.metadata.outputs.target_sha }}
+
+      - uses: ./.github/actions/setup
+
+      - uses: ./.github/actions/build-binary
+        with:
+          archive: ${{ matrix.archive }}
+          artifact: ${{ matrix.artifact }}
+          ext: ${{ matrix.ext }}
+
+  publish:
+    name: Publish GitHub Pre-release
+    needs:
+      - metadata
+      - build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download binaries
+        # actions/download-artifact@v4.1.8
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Generate checksums
+        shell: bash
+        working-directory: release-assets
+        run: sha256sum braintrust-setup-* > SHA256SUMS
+
+      - name: Create GitHub Pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.metadata.outputs.tag }}
+          TARGET_SHA: ${{ needs.metadata.outputs.target_sha }}
+        shell: bash
+        run: |
+          gh release create "$TAG" \
+            --target "$TARGET_SHA" \
+            --generate-notes \
+            --prerelease \
+            --latest=false \
+            release-assets/*
