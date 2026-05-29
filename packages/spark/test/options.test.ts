@@ -13,6 +13,14 @@ describe("parseArgs", () => {
     expect(options.appUrl).toBe("https://app.test");
   });
 
+  it("does not treat BRAINTRUST_APP_URL as prompt app URL copy", async () => {
+    const options = await parseArgs([], {
+      BRAINTRUST_APP_URL: "https://app.env/",
+    });
+
+    expect(options.appUrl).toBe("https://app.env");
+  });
+
   it("parses browser login org and project id args", async () => {
     const options = await parseArgs(
       ["--org-id", "org-123", "--proj-id", "proj-456"],

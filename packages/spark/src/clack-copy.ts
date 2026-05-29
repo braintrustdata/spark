@@ -168,8 +168,6 @@ export const CLACK_WIZARD_COPY = {
       completedQuestion:
         "Has your coding agent completed Braintrust instrumentation?",
       promptHeader: "Braintrust instrumentation prompt:",
-      localApiKeyContext: (envFilePath: string) =>
-        `\n## Local Braintrust API Key\n\nThe wizard wrote \`${envFilePath}\` with BRAINTRUST_API_KEY for local verification. Use it when running the application locally, but do not commit it.\n`,
     },
   },
 

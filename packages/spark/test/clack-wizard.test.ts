@@ -184,11 +184,10 @@ function createPrompts(inputs: FakePromptInputs) {
     },
     codingAgentOutput(options) {
       events.push(`agent:${options.toolLabel}`);
+      events.push(`agent.title:${options.title}`);
       return {
-        event(event) {
-          events.push(
-            `agent.event:${event.type}:${event.toolName ?? event.message}:${event.toolInput ?? ""}`,
-          );
+        message(message) {
+          events.push(`agent.message:${message}`);
         },
         fail(message) {
           events.push(`agent.error:${message}`);
@@ -282,7 +281,17 @@ function buildDeps(args: {
           expect(env["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
           expect(env["BT_WIZARD_RESULT_FILE"]).toBeDefined();
           expect(env["BT_WIZARD_LANGUAGES"]).toBeUndefined();
-          expect(prompt).toContain("Unattended mode (YOLO)");
+          expect(prompt).toContain(
+            "Look at the current workspace and instrument it with Braintrust tracing using the right Braintrust SDK(s).",
+          );
+          expect(prompt).toContain(
+            'For the SDK initialization configure the project name "demo".',
+          );
+          expect(prompt).toContain(
+            "Do not run the application code, just do code changes to instrument the application.",
+          );
+          expect(prompt).toContain("Do not use the Braintrust CLI (`bt`).");
+          expect(prompt).not.toContain("Unattended mode (YOLO)");
           onEvent({ type: "thinking", message: "Thinking..." });
           onEvent({
             type: "editing",
@@ -373,8 +382,9 @@ describe("runClackWizard", () => {
     ).toBe(false);
     expect(events).toContain("agent:Claude Code");
     expect(events).toContain(
-      "agent.event:editing:Edit:file_path: package.json",
+      "agent.title:Running Claude Code to instrument your application",
     );
+    expect(events).toContain("agent.message:edit package.json");
     expect(events).toContain("agent.success:Instrumentation complete.");
     expect(readFileSync(join(deps.cwd, ".env.braintrust"), "utf8")).toBe(
       "BRAINTRUST_API_KEY=bt-secret-key\n",
@@ -905,10 +915,15 @@ describe("runClackWizard", () => {
       "confirm:Has your coding agent completed Braintrust instrumentation?",
     );
     expect(events).not.toContain("agent:Claude Code");
-    expect(clipboardText).toContain("Interactive mode");
-    expect(clipboardText).toContain("Project name to set in code: demo");
+    expect(clipboardText).toContain(
+      "Look at the current workspace and instrument it with Braintrust tracing using the right Braintrust SDK(s).",
+    );
+    expect(clipboardText).toContain(
+      'For the SDK initialization configure the project name "demo".',
+    );
     expect(clipboardText).toContain(".env.braintrust");
-    expect(clipboardText).not.toContain("This run is non-interactive");
+    expect(clipboardText).toContain("Do not use the Braintrust CLI (`bt`).");
+    expect(clipboardText).not.toContain("Interactive mode");
     expectEnvNoticeBeforeWrite(events);
   });
 
@@ -924,9 +939,11 @@ describe("runClackWizard", () => {
       events.some(
         (event) =>
           event.startsWith("message:Braintrust instrumentation prompt:") &&
-          event.includes("Interactive mode") &&
           event.includes(
-            "https://www.braintrust.dev/docs/instrument/trace-llm-calls",
+            "https://www.braintrust.dev/docs/tracing-quickstart",
+          ) &&
+          event.includes(
+            'For the SDK initialization configure the project name "demo".',
           ),
       ),
     ).toBe(true);
