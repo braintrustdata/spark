@@ -14,6 +14,13 @@ import {
   stringField,
 } from "./utils";
 
+const CODEX_MODEL_ARGS = [
+  "--model",
+  "gpt-5.5",
+  "-c",
+  'model_reasoning_effort="xhigh"',
+] as const;
+
 export const codexAdapter: Adapter = {
   id: "codex",
   label: "Codex",
@@ -26,6 +33,7 @@ export const codexAdapter: Adapter = {
       "--json",
       "--ephemeral",
       "--skip-git-repo-check",
+      ...CODEX_MODEL_ARGS,
       "-s",
       "read-only",
       "-C",
@@ -42,6 +50,7 @@ export const codexAdapter: Adapter = {
       "--json",
       "--ephemeral",
       "--skip-git-repo-check",
+      ...CODEX_MODEL_ARGS,
       "-s",
       "danger-full-access",
       "--dangerously-bypass-approvals-and-sandbox",

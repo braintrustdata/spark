@@ -243,8 +243,11 @@ jobs:
           TAG: ${{ needs.prepare.outputs.tag }}
         shell: bash
         run: |
+          release_notes="$(printf '## Run this release\n\n```sh\ncurl -fsSL https://braintrust.dev/wizard/setup.sh | sh -s -- %s\n```' "$TAG")"
+
           gh release create "$TAG" \
             --target "$RELEASE_SHA" \
+            --notes "$release_notes" \
             --generate-notes \
             --latest \
             release-assets/*
