@@ -1,5 +1,10 @@
 import { cwd as processCwd } from "node:process";
 
+import type {
+  TaskLogCompletionOptions,
+  TaskLogMessageOptions,
+  TaskLogOptions,
+} from "@clack/prompts";
 import clipboard from "clipboardy";
 import pc from "picocolors";
 
@@ -88,6 +93,21 @@ type SelectOption<T> = {
   readonly hint?: string | undefined;
 };
 
+type CodingAgentOutput = {
+  readonly message: (message: string) => Promise<void> | void;
+  readonly fail: (message: string) => Promise<void> | void;
+  readonly success: (message: string) => Promise<void> | void;
+};
+
+type ClackTaskLog = {
+  readonly message: (message: string, options?: TaskLogMessageOptions) => void;
+  readonly error: (message: string, options?: TaskLogCompletionOptions) => void;
+  readonly success: (
+    message: string,
+    options?: TaskLogCompletionOptions,
+  ) => void;
+};
+
 export type ClackWizardPrompts = {
   readonly cancel: (message: string) => void;
   readonly confirm: (options: {
@@ -113,11 +133,11 @@ export type ClackWizardPrompts = {
     readonly start: (message?: string) => void;
     readonly stop: (message?: string) => void;
   };
-  readonly codingAgentOutput?: (options: { readonly toolLabel: string }) => {
-    readonly event: (event: CodingToolEvent) => void;
-    readonly fail: (message: string) => Promise<void> | void;
-    readonly success: (message: string) => Promise<void> | void;
-  };
+  readonly codingAgentOutput?: (options: {
+    readonly title: string;
+    readonly toolLabel: string;
+  }) => CodingAgentOutput;
+  readonly taskLog?: (options: TaskLogOptions) => ClackTaskLog;
   readonly log: {
     readonly warn: (message: string) => void;
     readonly info: (message: string) => void;
@@ -231,7 +251,6 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     await handleOwnAgentInstrumentation(deps, {
       org: session.orgName,
       project: session.projectName,
-      envFilePath,
     });
   } else {
     await confirmManualInstrumentation(prompts);
@@ -576,15 +595,13 @@ async function handleOwnAgentInstrumentation(
   args: {
     readonly org: string;
     readonly project: string;
-    readonly envFilePath: string | undefined;
   },
 ): Promise<void> {
   const { prompts } = deps;
-  const promptText = `${renderPrompt({
-    interactive: true,
-    orgName: args.org,
+  const promptText = renderPrompt({
     projectName: args.project,
-  })}${renderOwnAgentEnvFileContext(args.envFilePath)}`;
+    appUrl: deps.options.appUrl,
+  });
   const delivery = unwrap(
     prompts,
     await prompts.select<OwnAgentPromptDelivery>({
@@ -637,11 +654,6 @@ function printInstrumentationPrompt(
   );
 }
 
-function renderOwnAgentEnvFileContext(envFilePath: string | undefined): string {
-  if (!envFilePath) return "";
-  return COPY.instrumentation.ownAgent.localApiKeyContext(envFilePath);
-}
-
 async function confirmProductionApiKey(
   prompts: ClackWizardPrompts,
   envFilePath: string | undefined,
@@ -689,11 +701,8 @@ async function runInstrumentation(
   const { prompts } = deps;
   const resultFilePath = allocateResultFile();
   const promptText = renderPrompt({
-    interactive: false,
-    yolo: true,
-    resultFilePath,
-    orgName: args.org,
     projectName: args.project,
+    appUrl: deps.options.appUrl,
   });
   const toolLabel = codingToolLabel(args.toolId);
   const renderer = new ClackToolRenderer(prompts, toolLabel);
