@@ -54,6 +54,8 @@ const BRAINTRUST_JSON_FILE_CONTENT = `${JSON.stringify(
   null,
   2,
 )}\n`;
+const LOCAL_TOKEN_GITIGNORE_CONTENT =
+  "# Added by Braintrust Wizard\n.env.braintrust\n.braintrust.json\n";
 
 const CANCEL = Symbol("cancel");
 
@@ -487,7 +489,7 @@ describe("runClackWizard", () => {
       BRAINTRUST_JSON_FILE_CONTENT,
     );
     expect(readFileSync(join(cwd, ".gitignore"), "utf8")).toBe(
-      ".env.braintrust\n.braintrust.json\n",
+      LOCAL_TOKEN_GITIGNORE_CONTENT,
     );
     expect(existsSync(join(root, ".env.braintrust"))).toBe(false);
     expect(existsSync(join(root, ".braintrust.json"))).toBe(false);
@@ -515,7 +517,7 @@ describe("runClackWizard", () => {
     expect(readFileSync(envFilePath, "utf8")).toBe("BRAINTRUST_API_KEY=old\n");
     expect(existsSync(join(cwd, ".braintrust.json"))).toBe(false);
     expect(readFileSync(join(cwd, ".gitignore"), "utf8")).toBe(
-      ".env.braintrust\n.braintrust.json\n",
+      LOCAL_TOKEN_GITIGNORE_CONTENT,
     );
   });
 
