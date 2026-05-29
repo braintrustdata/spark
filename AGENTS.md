@@ -24,6 +24,7 @@ Default implementation work should go into the Clack implementation. Do not work
 ## Architecture Guidelines
 
 - Use Clack for the default prompt flow.
+- Do not use Clack `confirm()` prompts in the default wizard. For yes/no decisions, use `select()` prompts with concise labels and clear hints for both choices.
 - Treat the Clack implementation as the current production/default path.
 - Treat the beau Ink implementation as active future replacement work, but do not modify it unless explicitly requested.
 - Use React Context plus reducers for global TUI state management in the beau Ink variant.

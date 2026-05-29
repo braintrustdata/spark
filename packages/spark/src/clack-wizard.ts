@@ -35,9 +35,8 @@ import {
   type CodingToolStatus,
 } from "./coding-tools";
 import {
+  braintrustTokenFilesExist,
   ensureEnvBraintrustIgnored,
-  envBraintrustExists,
-  envBraintrustPath,
   isGitRepo,
   writeEnvBraintrust,
 } from "./git";
@@ -93,6 +92,17 @@ type SelectOption<T> = {
   readonly hint?: string | undefined;
 };
 
+type BooleanSelectChoices = {
+  readonly yes: {
+    readonly label: string;
+    readonly hint?: string | undefined;
+  };
+  readonly no: {
+    readonly label: string;
+    readonly hint?: string | undefined;
+  };
+};
+
 type CodingAgentOutput = {
   readonly message: (message: string) => Promise<void> | void;
   readonly fail: (message: string) => Promise<void> | void;
@@ -110,10 +120,6 @@ type ClackTaskLog = {
 
 export type ClackWizardPrompts = {
   readonly cancel: (message: string) => void;
-  readonly confirm: (options: {
-    readonly initialValue?: boolean;
-    readonly message: string;
-  }) => Promise<boolean | symbol>;
   readonly intro: (message: string) => void;
   readonly isCancel: (value: unknown) => value is symbol;
   readonly note: (message: string, title?: string) => void;
@@ -189,6 +195,33 @@ function unwrap<T>(prompts: ClackWizardPrompts, value: T | symbol): T {
   return value;
 }
 
+async function selectBoolean(
+  prompts: ClackWizardPrompts,
+  args: {
+    readonly message: string;
+    readonly choices: BooleanSelectChoices;
+    readonly yesFirst: boolean;
+  },
+): Promise<boolean> {
+  const yesOption = {
+    label: args.choices.yes.label,
+    value: true,
+    hint: args.choices.yes.hint,
+  };
+  const noOption = {
+    label: args.choices.no.label,
+    value: false,
+    hint: args.choices.no.hint,
+  };
+  return unwrap(
+    prompts,
+    await prompts.select<boolean>({
+      message: args.message,
+      options: args.yesFirst ? [yesOption, noOption] : [noOption, yesOption],
+    }),
+  );
+}
+
 export type WizardResult = {
   readonly orgName: string;
   readonly projectName: string;
@@ -202,13 +235,11 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
   if (!(await isGitRepo(deps.cwd))) {
     prompts.log.warn(COPY.gitRepository.outsideRepoWarning);
-    const continueOutsideGit = unwrap(
-      prompts,
-      await prompts.confirm({
-        initialValue: false,
-        message: COPY.gitRepository.continueOutsideRepoQuestion,
-      }),
-    );
+    const continueOutsideGit = await selectBoolean(prompts, {
+      message: COPY.gitRepository.continueOutsideRepoQuestion,
+      choices: COPY.gitRepository.continueOutsideRepoChoices,
+      yesFirst: false,
+    });
     if (!continueOutsideGit) {
       prompts.cancel(WIZARD_CANCEL_MESSAGE);
       throw new WizardCancelledError();
@@ -321,13 +352,11 @@ async function loginWithBrowser(
 async function hasBraintrustAccount(
   prompts: ClackWizardPrompts,
 ): Promise<boolean> {
-  return unwrap(
-    prompts,
-    await prompts.confirm({
-      initialValue: true,
-      message: COPY.auth.accountQuestion,
-    }),
-  );
+  return selectBoolean(prompts, {
+    message: COPY.auth.accountQuestion,
+    choices: COPY.auth.accountChoices,
+    yesFirst: true,
+  });
 }
 
 async function selectInstrumentationMode(
@@ -371,39 +400,41 @@ async function handleBraintrustCliSetup(
       discovery.version ??
       commandPath ??
       COPY.braintrustCli.installedVersionUnknown;
-    const shouldUpdate = unwrap(
-      prompts,
-      await prompts.confirm({
-        initialValue: false,
-        message: COPY.braintrustCli.updateQuestion(installedLabel),
-      }),
-    );
+    const shouldUpdate = await selectBoolean(prompts, {
+      message: COPY.braintrustCli.updateQuestion(installedLabel),
+      choices: COPY.braintrustCli.updateChoices,
+      yesFirst: true,
+    });
     if (shouldUpdate && commandPath) {
+      const spinner = prompts.spinner();
+      spinner.start(COPY.braintrustCli.updating);
       try {
         await deps.braintrustCli.update(commandPath);
-        prompts.log.success(COPY.braintrustCli.updated);
+        spinner.stop(COPY.braintrustCli.updated);
         discovery = await deps.braintrustCli.discover();
         commandPath = discovery.commandPath ?? commandPath;
       } catch (error) {
+        spinner.stop(COPY.braintrustCli.updateStopped);
         prompts.log.warn(
           COPY.braintrustCli.updateFailed(summarizeBraintrustCliError(error)),
         );
       }
     }
   } else {
-    const shouldInstall = unwrap(
-      prompts,
-      await prompts.confirm({
-        initialValue: true,
-        message: COPY.braintrustCli.installQuestion,
-      }),
-    );
+    const shouldInstall = await selectBoolean(prompts, {
+      message: COPY.braintrustCli.installQuestion,
+      choices: COPY.braintrustCli.installChoices,
+      yesFirst: true,
+    });
     if (!shouldInstall) return;
 
+    const spinner = prompts.spinner();
+    spinner.start(COPY.braintrustCli.installing);
     try {
       await deps.braintrustCli.install();
-      prompts.log.success(COPY.braintrustCli.installed);
+      spinner.stop(COPY.braintrustCli.installed);
     } catch (error) {
+      spinner.stop(COPY.braintrustCli.installStopped);
       prompts.log.warn(
         COPY.braintrustCli.installFailed(summarizeBraintrustCliError(error)),
       );
@@ -436,16 +467,14 @@ async function handleBraintrustCliSetup(
     project: session.projectName,
   };
   if (braintrustCliContextConflicts(currentContext, targetContext)) {
-    const shouldSwitch = unwrap(
-      prompts,
-      await prompts.confirm({
-        initialValue: false,
-        message: COPY.braintrustCli.switchContextQuestion({
-          currentContext,
-          targetContext,
-        }),
+    const shouldSwitch = await selectBoolean(prompts, {
+      message: COPY.braintrustCli.switchContextQuestion({
+        currentContext,
+        targetContext,
       }),
-    );
+      choices: COPY.braintrustCli.switchContextChoices,
+      yesFirst: false,
+    });
     if (!shouldSwitch) {
       prompts.log.info(COPY.braintrustCli.leavingContextUnchanged);
       return;
@@ -522,24 +551,19 @@ async function writeLocalEnvBraintrust(
 ): Promise<string | undefined> {
   const { prompts } = deps;
   const targetDirectory = deps.cwd;
-  const envFilePath = envBraintrustPath(targetDirectory);
-  if (await envBraintrustExists(targetDirectory)) {
+  if (await braintrustTokenFilesExist(targetDirectory)) {
     prompts.note(
       COPY.instrumentation.localToken.existingNotice,
       COPY.instrumentation.localToken.title,
     );
-    const shouldReplace = unwrap(
-      prompts,
-      await prompts.confirm({
-        initialValue: false,
-        message: COPY.instrumentation.localToken.replaceQuestion,
-      }),
-    );
+    const shouldReplace = await selectBoolean(prompts, {
+      message: COPY.instrumentation.localToken.replaceQuestion,
+      choices: COPY.instrumentation.localToken.replaceChoices,
+      yesFirst: false,
+    });
     if (!shouldReplace) {
       const gitignoreResult = await ensureEnvBraintrustIgnored(targetDirectory);
-      prompts.log.info(
-        COPY.instrumentation.localToken.keptEnvFile(envFilePath),
-      );
+      prompts.log.info(COPY.instrumentation.localToken.keptTokenFiles());
       prompts.log.info(
         COPY.instrumentation.localToken.gitignoreNote({
           added: gitignoreResult.addedToGitignore,
@@ -557,7 +581,10 @@ async function writeLocalEnvBraintrust(
 
   const result = await writeEnvBraintrust(targetDirectory, apiKey);
   prompts.log.success(
-    COPY.instrumentation.localToken.wroteEnvFile(result.envFilePath),
+    COPY.instrumentation.localToken.wroteTokenFiles({
+      envFilePath: result.envFilePath,
+      braintrustJsonFilePath: result.braintrustJsonFilePath,
+    }),
   );
   prompts.log.info(
     COPY.instrumentation.localToken.gitignoreNote({
@@ -577,13 +604,11 @@ async function confirmManualInstrumentation(
     ),
     COPY.instrumentation.manual.title,
   );
-  const completed = unwrap(
-    prompts,
-    await prompts.confirm({
-      initialValue: false,
-      message: COPY.instrumentation.manual.completedQuestion,
-    }),
-  );
+  const completed = await selectBoolean(prompts, {
+    message: COPY.instrumentation.manual.completedQuestion,
+    choices: COPY.instrumentation.manual.completedChoices,
+    yesFirst: false,
+  });
   if (!completed) {
     prompts.cancel(WIZARD_CANCEL_MESSAGE);
     throw new WizardCancelledError();
@@ -632,13 +657,11 @@ async function handleOwnAgentInstrumentation(
     printInstrumentationPrompt(prompts, promptText);
   }
 
-  const completed = unwrap(
-    prompts,
-    await prompts.confirm({
-      initialValue: false,
-      message: COPY.instrumentation.ownAgent.completedQuestion,
-    }),
-  );
+  const completed = await selectBoolean(prompts, {
+    message: COPY.instrumentation.ownAgent.completedQuestion,
+    choices: COPY.instrumentation.ownAgent.completedChoices,
+    yesFirst: false,
+  });
   if (!completed) {
     prompts.cancel(WIZARD_CANCEL_MESSAGE);
     throw new WizardCancelledError();
