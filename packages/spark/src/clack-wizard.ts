@@ -529,6 +529,10 @@ async function selectBuiltInCodingTool(
     throw new Error(COPY.instrumentation.builtIn.noUsableToolsError);
   }
 
+  if (usable.length === 1) {
+    return usable[0]!;
+  }
+
   const value = unwrap(
     prompts,
     await prompts.select<CodingToolStatus>({

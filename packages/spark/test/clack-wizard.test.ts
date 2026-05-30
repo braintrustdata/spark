@@ -353,7 +353,7 @@ function createBraintrustCliStub(
 describe("runClackWizard", () => {
   it("walks through the happy path with one usable coding tool", async () => {
     const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "first", "first", "production-done"],
+      selects: ["yes", "no", "first", "production-done"],
     });
     const deps = buildDeps({ prompts });
 
@@ -367,7 +367,7 @@ describe("runClackWizard", () => {
     expect(events).toContain(`select:${ACCOUNT_QUESTION}`);
     expect(events).toContain(`select:${CLI_INSTALL_MESSAGE}`);
     expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
-    expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
+    expect(events).not.toContain(`select:${TOOL_SELECT_MESSAGE}`);
     expect(events.some((event) => event.startsWith("info:Sign in:"))).toBe(
       true,
     );
