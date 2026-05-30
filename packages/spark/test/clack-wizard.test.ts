@@ -411,7 +411,7 @@ describe("runClackWizard", () => {
       ),
     ).toBe(false);
     expect(events).toContain(
-      "info:Check your Braintrust logs: https://app.test/acme/p/demo/logs",
+      "info:Check your Braintrust logs: https://app.test/app/acme/p/demo/logs",
     );
   });
 

@@ -287,7 +287,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     await confirmManualInstrumentation(prompts);
   }
 
-  const projectLogsUrl = `${deps.options.appUrl}/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
+  const projectLogsUrl = `${deps.options.appUrl}/app/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
   prompts.log.info(COPY.logs.projectLogsUrl(projectLogsUrl));
 
   await confirmProductionApiKey(prompts, envFilePath);

@@ -14,7 +14,7 @@ export function buildLogsPermalink(
   appUrl: string,
   trace: TraceLocation,
 ): string {
-  const base = `${appUrl}/${encodeURIComponent(trace.org)}/p/${encodeURIComponent(trace.project)}/logs`;
+  const base = `${appUrl}/app/${encodeURIComponent(trace.org)}/p/${encodeURIComponent(trace.project)}/logs`;
   const params = new URLSearchParams({ r: trace.rootSpanId });
   if (trace.spanId) {
     params.set("s", trace.spanId);
