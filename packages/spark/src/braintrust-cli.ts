@@ -17,6 +17,10 @@ export type BraintrustCliContext = {
   readonly project?: string;
 };
 
+export type BraintrustCliUpdateCheck = {
+  readonly upToDate: boolean;
+};
+
 export type BraintrustCliConfigureArgs = {
   readonly apiKey: string;
   readonly apiUrl: string;
@@ -28,6 +32,9 @@ export type BraintrustCliConfigureArgs = {
 export type BraintrustCliRuntime = {
   readonly discover: () => Promise<BraintrustCliDiscovery>;
   readonly install: () => Promise<void>;
+  readonly checkForUpdate: (
+    commandPath: string,
+  ) => Promise<BraintrustCliUpdateCheck>;
   readonly update: (commandPath: string) => Promise<void>;
   readonly status: (commandPath: string) => Promise<BraintrustCliContext>;
   readonly loginAndSwitch: (
@@ -112,6 +119,20 @@ export function createBraintrustCliRuntime(
               env,
             };
       await execChecked("Braintrust CLI install", spec, exec);
+    },
+
+    async checkForUpdate(commandPath) {
+      const result = await exec({
+        command: commandPath,
+        args: ["self", "update", "--check", "--json"],
+        env,
+      });
+      if (result.exitCode !== 0) {
+        throw new Error(
+          `Braintrust CLI update check failed with exit code ${result.exitCode}. ${summarizeCommandOutput(result)}`.trim(),
+        );
+      }
+      return parseUpdateCheckJson(result.stdout);
     },
 
     async update(commandPath) {
@@ -280,6 +301,25 @@ async function executableExists(path: string): Promise<boolean> {
     () => true,
     () => false,
   );
+}
+
+function parseUpdateCheckJson(stdout: string): BraintrustCliUpdateCheck {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    throw new Error("Braintrust CLI update check returned invalid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("Braintrust CLI update check returned invalid JSON.");
+  }
+  const upToDate = (parsed as Record<string, unknown>)["up_to_date"];
+  if (typeof upToDate !== "boolean") {
+    throw new Error(
+      "Braintrust CLI update check response was missing the `up_to_date` field.",
+    );
+  }
+  return { upToDate };
 }
 
 function parseStatusJson(stdout: string): BraintrustCliContext {

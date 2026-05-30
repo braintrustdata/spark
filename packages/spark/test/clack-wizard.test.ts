@@ -21,6 +21,7 @@ import {
   type BraintrustCliDiscovery,
   type BraintrustCliContext,
   type BraintrustCliRuntime,
+  type BraintrustCliUpdateCheck,
 } from "../src/braintrust-cli";
 import {
   type CodingToolRuntime,
@@ -388,6 +389,9 @@ function createBraintrustCliStub(
   args: {
     readonly discoveries?: readonly BraintrustCliDiscovery[];
     readonly install?: () => Promise<void>;
+    readonly checkForUpdate?: (
+      commandPath: string,
+    ) => Promise<BraintrustCliUpdateCheck>;
     readonly update?: (commandPath: string) => Promise<void>;
     readonly status?: (commandPath: string) => Promise<BraintrustCliContext>;
     readonly loginAndSwitch?: (
@@ -407,6 +411,8 @@ function createBraintrustCliStub(
       return Promise.resolve(discovery);
     },
     install: args.install ?? (() => Promise.resolve()),
+    checkForUpdate:
+      args.checkForUpdate ?? (() => Promise.resolve({ upToDate: false })),
     update: args.update ?? (() => Promise.resolve()),
     status: args.status ?? (() => Promise.resolve({})),
     loginAndSwitch: args.loginAndSwitch ?? (() => Promise.resolve()),
@@ -877,6 +883,82 @@ describe("runClackWizard", () => {
     ).toBe(true);
     expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
     expect(calls).toEqual([]);
+  });
+
+  it("skips the update question when the Braintrust CLI is already up to date", async () => {
+    const calls: string[] = [];
+    const { events } = createPrompts({
+      selects: ["yes", "manual", "confirm", "understood"],
+    });
+    const deps = buildDeps({
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        checkForUpdate: (commandPath) => {
+          calls.push(`check:${commandPath}`);
+          return Promise.resolve({ upToDate: true });
+        },
+        update: (commandPath) => {
+          calls.push(`update:${commandPath}`);
+          return Promise.resolve();
+        },
+        status: () => {
+          calls.push("status");
+          return Promise.resolve({});
+        },
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).not.toContain(`select:${CLI_UPDATE_MESSAGE}`);
+    expect(events).not.toContain("spinner.start:Updating Braintrust CLI...");
+    expect(
+      events.some((event) =>
+        event.startsWith("info:Braintrust CLI is up to date"),
+      ),
+    ).toBe(true);
+    expect(calls).toEqual(["check:/bin/bt", "status", "login"]);
+  });
+
+  it("asks to update when the update check fails", async () => {
+    const calls: string[] = [];
+    const { events } = createPrompts({
+      selects: ["no", "yes", "manual", "confirm", "understood"],
+    });
+    const deps = buildDeps({
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        checkForUpdate: () => Promise.reject(new Error("network down")),
+        status: () => {
+          calls.push("status");
+          return Promise.resolve({});
+        },
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(
+      events.some((event) =>
+        event.startsWith(
+          "warn:Could not check for Braintrust CLI updates: network down",
+        ),
+      ),
+    ).toBe(true);
+    expect(events).toContain(`select:${CLI_UPDATE_MESSAGE}`);
+    expect(calls).toEqual(["status", "login"]);
   });
 
   it("updates and configures an installed Braintrust CLI when accepted", async () => {

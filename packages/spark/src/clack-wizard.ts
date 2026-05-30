@@ -394,22 +394,47 @@ async function handleBraintrustCliSetup(
   let commandPath = discovery.commandPath;
 
   if (discovery.installed) {
-    const shouldUpdate = await selectBoolean({
-      message: COPY.braintrustCli.updateQuestion,
-      choices: COPY.braintrustCli.updateChoices,
-      yesFirst: true,
-    });
-    if (shouldUpdate && commandPath) {
-      spinner.update(COPY.braintrustCli.updating);
+    if (commandPath) {
+      const installedLabel =
+        discovery.version ??
+        commandPath ??
+        COPY.braintrustCli.installedVersionUnknown;
+
+      let upToDate = false;
       try {
-        await deps.braintrustCli.update(commandPath);
-        discovery = await deps.braintrustCli.discover();
-        commandPath = discovery.commandPath ?? commandPath;
+        const check = await deps.braintrustCli.checkForUpdate(commandPath);
+        upToDate = check.upToDate;
       } catch (error) {
-        spinner.clear();
         clack.log.warn(
-          COPY.braintrustCli.updateFailed(summarizeBraintrustCliError(error)),
+          COPY.braintrustCli.updateCheckFailed(
+            summarizeBraintrustCliError(error),
+          ),
         );
+      }
+
+      if (upToDate) {
+        clack.log.info(COPY.braintrustCli.upToDate(installedLabel));
+      } else {
+        const shouldUpdate = await selectBoolean({
+          message: COPY.braintrustCli.updateQuestion,
+          choices: COPY.braintrustCli.updateChoices,
+          yesFirst: true,
+        });
+        if (shouldUpdate) {
+          spinner.update(COPY.braintrustCli.updating);
+          try {
+            await deps.braintrustCli.update(commandPath);
+            discovery = await deps.braintrustCli.discover();
+            commandPath = discovery.commandPath ?? commandPath;
+          } catch (error) {
+            spinner.clear();
+            clack.log.warn(
+              COPY.braintrustCli.updateFailed(
+                summarizeBraintrustCliError(error),
+              ),
+            );
+          }
+        }
       }
     }
   } else {

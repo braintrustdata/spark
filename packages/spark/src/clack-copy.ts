@@ -93,6 +93,10 @@ export const CLACK_WIZARD_COPY = {
     configuringContext: "Configuring Braintrust CLI context...",
     updateFailed: (message: string) =>
       `Could not update Braintrust CLI: ${message}`,
+    updateCheckFailed: (message: string) =>
+      `Could not check for Braintrust CLI updates: ${message}`,
+    upToDate: (installedLabel: string) =>
+      `Braintrust CLI is up to date (${installedLabel}).`,
     installFailed: (message: string) =>
       `Could not install Braintrust CLI: ${message}`,
     configureFailed: (message: string) =>
