@@ -1,10 +1,7 @@
 import { cwd as processCwd } from "node:process";
+import { relative } from "node:path";
 
-import type {
-  TaskLogCompletionOptions,
-  TaskLogMessageOptions,
-  TaskLogOptions,
-} from "@clack/prompts";
+import * as clack from "@clack/prompts";
 import clipboard from "clipboardy";
 import pc from "picocolors";
 
@@ -86,12 +83,6 @@ const MANUAL_INSTRUMENTATION_CHOICE: ManualInstrumentationChoice = {
   label: COPY.instrumentation.modes.manual.label,
 };
 
-type SelectOption<T> = {
-  readonly label: string;
-  readonly value: T;
-  readonly hint?: string | undefined;
-};
-
 type BooleanSelectChoices = {
   readonly yes: {
     readonly label: string;
@@ -103,62 +94,10 @@ type BooleanSelectChoices = {
   };
 };
 
-type CodingAgentOutput = {
-  readonly message: (message: string) => Promise<void> | void;
-  readonly fail: (message: string) => Promise<void> | void;
-  readonly success: (message: string) => Promise<void> | void;
-};
-
-type ClackTaskLog = {
-  readonly message: (message: string, options?: TaskLogMessageOptions) => void;
-  readonly error: (message: string, options?: TaskLogCompletionOptions) => void;
-  readonly success: (
-    message: string,
-    options?: TaskLogCompletionOptions,
-  ) => void;
-};
-
-export type ClackWizardPrompts = {
-  readonly cancel: (message: string) => void;
-  readonly intro: (message: string) => void;
-  readonly isCancel: (value: unknown) => value is symbol;
-  readonly note: (message: string, title?: string) => void;
-  readonly outro: (message: string) => void;
-  readonly password: (options: {
-    readonly message: string;
-  }) => Promise<string | symbol>;
-  readonly select: <T>(options: {
-    readonly message: string;
-    readonly options: ReadonlyArray<SelectOption<T>>;
-  }) => Promise<T | symbol>;
-  readonly text: (options: {
-    readonly message: string;
-    readonly placeholder?: string;
-  }) => Promise<string | symbol>;
-  readonly spinner: () => {
-    readonly start: (message?: string) => void;
-    readonly stop: (message?: string) => void;
-  };
-  readonly codingAgentOutput?: (options: {
-    readonly title: string;
-    readonly toolLabel: string;
-  }) => CodingAgentOutput;
-  readonly taskLog?: (options: TaskLogOptions) => ClackTaskLog;
-  readonly log: {
-    readonly warn: (message: string) => void;
-    readonly info: (message: string) => void;
-    readonly error: (message: string) => void;
-    readonly success: (message: string) => void;
-    readonly message: (message: string) => void;
-  };
-  readonly writeRaw: (message: string) => void;
-};
-
 export type WizardDeps = {
   readonly cwd: string;
   readonly env: NodeJS.ProcessEnv;
   readonly options: WizardOptions;
-  readonly prompts: ClackWizardPrompts;
   readonly loginWithWizardSession: WizardSessionLogin;
   readonly openBrowser: (url: string) => Promise<boolean>;
   readonly writeClipboard: (text: string) => Promise<void>;
@@ -188,35 +127,35 @@ export class WizardCancelledError extends Error {
   }
 }
 
-function unwrap<T>(prompts: ClackWizardPrompts, value: T | symbol): T {
-  if (prompts.isCancel(value)) {
-    prompts.cancel(WIZARD_CANCEL_MESSAGE);
+function unwrap<T>(value: T | symbol): T {
+  if (clack.isCancel(value)) {
+    clack.cancel(WIZARD_CANCEL_MESSAGE);
     throw new WizardCancelledError();
   }
   return value;
 }
 
-async function selectBoolean(
-  prompts: ClackWizardPrompts,
-  args: {
-    readonly message: string;
-    readonly choices: BooleanSelectChoices;
-    readonly yesFirst: boolean;
-  },
-): Promise<boolean> {
+async function selectBoolean(args: {
+  readonly message: string;
+  readonly choices: BooleanSelectChoices;
+  readonly yesFirst: boolean;
+}): Promise<boolean> {
   const yesOption = {
     label: args.choices.yes.label,
-    value: true,
-    hint: args.choices.yes.hint,
+    value: true as const,
+    ...(args.choices.yes.hint === undefined
+      ? {}
+      : { hint: args.choices.yes.hint }),
   };
   const noOption = {
     label: args.choices.no.label,
-    value: false,
-    hint: args.choices.no.hint,
+    value: false as const,
+    ...(args.choices.no.hint === undefined
+      ? {}
+      : { hint: args.choices.no.hint }),
   };
   return unwrap(
-    prompts,
-    await prompts.select<boolean>({
+    await clack.select<boolean>({
       message: args.message,
       options: args.yesFirst ? [yesOption, noOption] : [noOption, yesOption],
     }),
@@ -230,19 +169,18 @@ export type WizardResult = {
 };
 
 export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
-  const { prompts } = deps;
-  prompts.intro(COPY.welcome.intro);
-  prompts.note(COPY.welcome.setupPlan, COPY.welcome.setupPlanTitle);
+  process.stdout.write("\n");
+  clack.intro(COPY.welcome.intro);
 
   if (!(await isGitRepo(deps.cwd))) {
-    prompts.log.warn(COPY.gitRepository.outsideRepoWarning);
-    const continueOutsideGit = await selectBoolean(prompts, {
+    clack.log.warn(COPY.gitRepository.outsideRepoWarning);
+    const continueOutsideGit = await selectBoolean({
       message: COPY.gitRepository.continueOutsideRepoQuestion,
       choices: COPY.gitRepository.continueOutsideRepoChoices,
       yesFirst: false,
     });
     if (!continueOutsideGit) {
-      prompts.cancel(WIZARD_CANCEL_MESSAGE);
+      clack.cancel(WIZARD_CANCEL_MESSAGE);
       throw new WizardCancelledError();
     }
   }
@@ -255,45 +193,76 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
           apiUrl: deps.options.apiUrl,
         })
       : await loginWithBrowser(deps, {
-          authMode: (await hasBraintrustAccount(prompts)) ? "signin" : "signup",
+          authMode: (await hasBraintrustAccount()) ? "signin" : "signup",
         });
 
   const envFilePath = await writeLocalEnvBraintrust(deps, session.apiKey);
 
   await handleBraintrustCliSetup(deps, session);
 
-  const instrumentationMode = await selectInstrumentationMode(prompts);
+  const codingToolStatuses = await preflightCodingTools(deps);
+  const hasUsableCodingTool = codingToolStatuses.some(
+    (status) => status.usable,
+  );
+  if (!hasUsableCodingTool) {
+    warnNoUsableCodingTools(codingToolStatuses);
+  }
+
+  let instrumentationMode: InstrumentationModeChoice | undefined =
+    await selectInstrumentationMode({
+      includeBuiltIn: hasUsableCodingTool,
+    });
 
   if (instrumentationMode.id === "built-in") {
-    const instrumentation = await selectBuiltInCodingTool(deps);
-    prompts.log.info(
-      COPY.instrumentation.builtIn.usingTool(instrumentation.label),
+    const instrumentation = await selectBuiltInCodingTool(codingToolStatuses);
+    const proceed = unwrap(
+      await clack.select<"proceed" | "abort">({
+        message: COPY.instrumentation.builtIn.proceedQuestion,
+        options: [
+          {
+            label: COPY.instrumentation.builtIn.proceedChoices.yes.label,
+            value: "proceed",
+            hint: COPY.instrumentation.builtIn.proceedChoices.yes.hint,
+          },
+          {
+            label: COPY.instrumentation.builtIn.proceedChoices.no.label,
+            value: "abort",
+            hint: COPY.instrumentation.builtIn.proceedChoices.no.hint,
+          },
+        ],
+      }),
     );
-    await deps.codingTools.smokeTest({
-      id: instrumentation.id,
-      cwd: deps.cwd,
-    });
-    await runInstrumentation(deps, {
-      org: session.orgName,
-      project: session.projectName,
-      apiKey: session.apiKey,
-      toolId: instrumentation.id,
-    });
-  } else if (instrumentationMode.id === "own-agent") {
+
+    if (proceed === "proceed") {
+      await runInstrumentation(deps, {
+        org: session.orgName,
+        project: session.projectName,
+        apiKey: session.apiKey,
+        toolId: instrumentation.id,
+      });
+      instrumentationMode = undefined;
+    } else {
+      instrumentationMode = await selectInstrumentationMode({
+        includeBuiltIn: false,
+      });
+    }
+  }
+
+  if (instrumentationMode?.id === "own-agent") {
     await handleOwnAgentInstrumentation(deps, {
       org: session.orgName,
       project: session.projectName,
     });
-  } else {
-    await confirmManualInstrumentation(prompts);
+  } else if (instrumentationMode?.id === "manual") {
+    await confirmManualInstrumentation();
   }
 
   const projectLogsUrl = `${deps.options.appUrl}/app/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
-  prompts.log.info(COPY.logs.projectLogsUrl(projectLogsUrl));
+  clack.log.info(COPY.logs.projectLogsUrl(projectLogsUrl));
 
-  await confirmProductionApiKey(prompts, envFilePath);
+  await confirmProductionApiKey(envFilePath);
 
-  prompts.outro(COPY.outro.complete(COPY.shared.instrumentationDocsUrl));
+  clack.outro(COPY.outro.complete(COPY.shared.instrumentationDocsUrl));
 
   return {
     orgName: session.orgName,
@@ -308,8 +277,7 @@ async function loginWithBrowser(
     readonly authMode: WizardSessionLoginUrlParams["authMode"];
   },
 ): Promise<WizardSessionCompleteResult> {
-  const { prompts } = deps;
-  const spinner = prompts.spinner();
+  const spinner = clack.spinner();
   let spinnerStarted = false;
 
   try {
@@ -321,9 +289,9 @@ async function loginWithBrowser(
       },
       events: {
         onLoginUrl: ({ loginUrl, verificationCode }) => {
-          prompts.log.info(
+          clack.log.info(
             COPY.auth.browserLoginInfo({
-              loginLink: terminalHyperlink(loginUrl),
+              loginLink: loginUrl,
               verificationCode: pc.reset(
                 pc.bold(pc.whiteBright(verificationCode)),
               ),
@@ -350,29 +318,30 @@ async function loginWithBrowser(
   }
 }
 
-async function hasBraintrustAccount(
-  prompts: ClackWizardPrompts,
-): Promise<boolean> {
-  return selectBoolean(prompts, {
+async function hasBraintrustAccount(): Promise<boolean> {
+  return selectBoolean({
     message: COPY.auth.accountQuestion,
     choices: COPY.auth.accountChoices,
     yesFirst: true,
   });
 }
 
-async function selectInstrumentationMode(
-  prompts: ClackWizardPrompts,
-): Promise<InstrumentationModeChoice> {
+async function selectInstrumentationMode(args: {
+  readonly includeBuiltIn: boolean;
+}): Promise<InstrumentationModeChoice> {
   return unwrap(
-    prompts,
-    await prompts.select<InstrumentationModeChoice>({
+    await clack.select<InstrumentationModeChoice>({
       message: COPY.instrumentation.modeQuestion,
       options: [
-        {
-          label: BUILT_IN_INSTRUMENTATION_CHOICE.label,
-          value: BUILT_IN_INSTRUMENTATION_CHOICE,
-          hint: COPY.instrumentation.modes.builtIn.hint,
-        },
+        ...(args.includeBuiltIn
+          ? [
+              {
+                label: BUILT_IN_INSTRUMENTATION_CHOICE.label,
+                value: BUILT_IN_INSTRUMENTATION_CHOICE,
+                hint: COPY.instrumentation.modes.builtIn.hint,
+              },
+            ]
+          : []),
         {
           label: OWN_AGENT_INSTRUMENTATION_CHOICE.label,
           value: OWN_AGENT_INSTRUMENTATION_CHOICE,
@@ -392,51 +361,62 @@ async function handleBraintrustCliSetup(
   deps: WizardDeps,
   session: WizardSessionCompleteResult,
 ): Promise<void> {
-  const { prompts } = deps;
   let discovery = await deps.braintrustCli.discover();
   let commandPath = discovery.commandPath;
+  const spinner = clack.spinner();
+  let spinnerActive = false;
+  const updateSpinner = (message: string) => {
+    if (spinnerActive) {
+      spinner.message(message);
+    } else {
+      spinner.start(message);
+      spinnerActive = true;
+    }
+  };
+  const clearSpinner = () => {
+    if (spinnerActive) {
+      spinner.clear();
+      spinnerActive = false;
+    }
+  };
 
   if (discovery.installed) {
     const installedLabel =
       discovery.version ??
       commandPath ??
       COPY.braintrustCli.installedVersionUnknown;
-    const shouldUpdate = await selectBoolean(prompts, {
+    const shouldUpdate = await selectBoolean({
       message: COPY.braintrustCli.updateQuestion(installedLabel),
       choices: COPY.braintrustCli.updateChoices,
       yesFirst: true,
     });
     if (shouldUpdate && commandPath) {
-      const spinner = prompts.spinner();
-      spinner.start(COPY.braintrustCli.updating);
+      updateSpinner(COPY.braintrustCli.updating);
       try {
         await deps.braintrustCli.update(commandPath);
-        spinner.stop(COPY.braintrustCli.updated);
         discovery = await deps.braintrustCli.discover();
         commandPath = discovery.commandPath ?? commandPath;
       } catch (error) {
-        spinner.stop(COPY.braintrustCli.updateStopped);
-        prompts.log.warn(
+        clearSpinner();
+        clack.log.warn(
           COPY.braintrustCli.updateFailed(summarizeBraintrustCliError(error)),
         );
       }
     }
   } else {
-    const shouldInstall = await selectBoolean(prompts, {
+    const shouldInstall = await selectBoolean({
       message: COPY.braintrustCli.installQuestion,
       choices: COPY.braintrustCli.installChoices,
       yesFirst: true,
     });
     if (!shouldInstall) return;
 
-    const spinner = prompts.spinner();
-    spinner.start(COPY.braintrustCli.installing);
+    updateSpinner(COPY.braintrustCli.installing);
     try {
       await deps.braintrustCli.install();
-      spinner.stop(COPY.braintrustCli.installed);
     } catch (error) {
-      spinner.stop(COPY.braintrustCli.installStopped);
-      prompts.log.warn(
+      clearSpinner();
+      clack.log.warn(
         COPY.braintrustCli.installFailed(summarizeBraintrustCliError(error)),
       );
       return;
@@ -445,7 +425,8 @@ async function handleBraintrustCliSetup(
     discovery = await deps.braintrustCli.discover();
     commandPath = discovery.commandPath;
     if (!discovery.installed || !commandPath) {
-      prompts.log.warn(COPY.braintrustCli.installedButNotFound);
+      clearSpinner();
+      clack.log.warn(COPY.braintrustCli.installedButNotFound);
       return;
     }
   }
@@ -453,10 +434,12 @@ async function handleBraintrustCliSetup(
   if (!commandPath) return;
 
   let currentContext: BraintrustCliContext;
+  updateSpinner(COPY.braintrustCli.checkingContext);
   try {
     currentContext = await deps.braintrustCli.status(commandPath);
   } catch (error) {
-    prompts.log.warn(
+    clearSpinner();
+    clack.log.warn(
       COPY.braintrustCli.statusFailed(summarizeBraintrustCliError(error)),
     );
     return;
@@ -468,20 +451,21 @@ async function handleBraintrustCliSetup(
     project: session.projectName,
   };
   if (braintrustCliContextConflicts(currentContext, targetContext)) {
-    const shouldSwitch = await selectBoolean(prompts, {
+    clearSpinner();
+    const shouldSwitch = await selectBoolean({
       message: COPY.braintrustCli.switchContextQuestion({
         currentContext,
         targetContext,
       }),
       choices: COPY.braintrustCli.switchContextChoices,
-      yesFirst: false,
+      yesFirst: true,
     });
     if (!shouldSwitch) {
-      prompts.log.info(COPY.braintrustCli.leavingContextUnchanged);
       return;
     }
   }
 
+  updateSpinner(COPY.braintrustCli.configuringContext);
   try {
     await deps.braintrustCli.loginAndSwitch(commandPath, {
       apiKey: session.apiKey,
@@ -490,9 +474,10 @@ async function handleBraintrustCliSetup(
       orgName: session.orgName,
       projectName: session.projectName,
     });
-    prompts.log.success(COPY.braintrustCli.configured);
+    clearSpinner();
   } catch (error) {
-    prompts.log.warn(
+    clearSpinner();
+    clack.log.warn(
       COPY.braintrustCli.configureFailed(summarizeBraintrustCliError(error)),
     );
   }
@@ -502,31 +487,60 @@ function braintrustCliContextConflicts(
   current: BraintrustCliContext,
   target: Required<BraintrustCliContext>,
 ): boolean {
+  if (
+    current.profile === undefined ||
+    current.org === undefined ||
+    current.project === undefined
+  ) {
+    return false;
+  }
+
   return (
-    (current.profile !== undefined && current.profile !== target.profile) ||
-    (current.org !== undefined && current.org !== target.org) ||
-    (current.project !== undefined && current.project !== target.project)
+    current.profile !== target.profile ||
+    current.org !== target.org ||
+    current.project !== target.project
   );
 }
 
-async function selectBuiltInCodingTool(
+async function preflightCodingTools(
   deps: WizardDeps,
-): Promise<CodingToolStatus> {
-  const { prompts } = deps;
-  const statuses = await deps.codingTools.discover();
+): Promise<readonly CodingToolStatus[]> {
+  const spinner = clack.spinner();
+  spinner.start(COPY.instrumentation.builtIn.determiningAvailable);
+  try {
+    const statuses = await deps.codingTools.discover();
+    return await Promise.all(
+      statuses.map(async (status) => {
+        if (!status.usable) return status;
 
+        try {
+          await deps.codingTools.smokeTest({
+            id: status.id,
+            cwd: deps.cwd,
+          });
+          return status;
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return {
+            ...status,
+            usable: false,
+            unavailableReason: message || "Smoke test failed.",
+          };
+        }
+      }),
+    );
+  } finally {
+    spinner.clear();
+  }
+}
+
+async function selectBuiltInCodingTool(
+  statuses: readonly CodingToolStatus[],
+): Promise<CodingToolStatus> {
   const usable = statuses.filter((status) => status.usable);
   if (usable.length === 0) {
-    prompts.log.warn(
-      COPY.instrumentation.builtIn.noUsableToolsWarning(
-        statuses.map((status) =>
-          COPY.instrumentation.builtIn.unavailableToolLine(
-            status.label,
-            COPY.instrumentation.builtIn.unavailableToolMessage(status),
-          ),
-        ),
-      ),
-    );
+    warnNoUsableCodingTools(statuses);
     throw new Error(COPY.instrumentation.builtIn.noUsableToolsError);
   }
 
@@ -535,89 +549,97 @@ async function selectBuiltInCodingTool(
   }
 
   const value = unwrap(
-    prompts,
-    await prompts.select<CodingToolStatus>({
+    await clack.select<CodingToolStatus>({
       message: COPY.instrumentation.builtIn.toolQuestion,
       options: [
-        ...usable.map((tool) => ({
-          label: tool.label,
-          value: tool,
-          hint: tool.authMode ?? tool.version,
-        })),
+        ...usable.map((tool) => {
+          const hint = tool.authMode ?? tool.version;
+          return {
+            label: tool.label,
+            value: tool,
+            ...(hint === undefined ? {} : { hint }),
+          };
+        }),
       ],
     }),
   );
   return value;
 }
 
+function warnNoUsableCodingTools(statuses: readonly CodingToolStatus[]): void {
+  clack.log.warn(
+    COPY.instrumentation.builtIn.noUsableToolsWarning(
+      statuses.map((status) =>
+        COPY.instrumentation.builtIn.unavailableToolLine(
+          status.label,
+          COPY.instrumentation.builtIn.unavailableToolMessage(status),
+        ),
+      ),
+    ),
+  );
+}
+
 async function writeLocalEnvBraintrust(
   deps: WizardDeps,
   apiKey: string,
 ): Promise<string | undefined> {
-  const { prompts } = deps;
   const targetDirectory = deps.cwd;
   if (await braintrustTokenFilesExist(targetDirectory)) {
-    prompts.note(
+    clack.note(
       COPY.instrumentation.localToken.existingNotice,
       COPY.instrumentation.localToken.title,
     );
-    const shouldReplace = await selectBoolean(prompts, {
+    const shouldReplace = await selectBoolean({
       message: COPY.instrumentation.localToken.replaceQuestion,
       choices: COPY.instrumentation.localToken.replaceChoices,
-      yesFirst: false,
+      yesFirst: true,
     });
     if (!shouldReplace) {
       const gitignoreResult = await ensureEnvBraintrustIgnored(targetDirectory);
-      prompts.log.info(COPY.instrumentation.localToken.keptTokenFiles());
-      prompts.log.info(
-        COPY.instrumentation.localToken.gitignoreNote({
-          added: gitignoreResult.addedToGitignore,
-          alreadyCovered: gitignoreResult.alreadyCovered,
-        }),
-      );
+      const gitignoreNote = COPY.instrumentation.localToken.gitignoreNote({
+        added: gitignoreResult.addedToGitignore,
+        alreadyCovered: gitignoreResult.alreadyCovered,
+      });
+      clack.log.info(COPY.instrumentation.localToken.keptTokenFiles());
+      if (gitignoreNote) clack.log.info(gitignoreNote);
       return undefined;
     }
   } else {
-    prompts.note(
+    clack.note(
       COPY.instrumentation.localToken.notice,
       COPY.instrumentation.localToken.title,
     );
   }
 
   const result = await writeEnvBraintrust(targetDirectory, apiKey);
-  prompts.log.success(
-    COPY.instrumentation.localToken.wroteTokenFiles({
-      envFilePath: result.envFilePath,
-      braintrustJsonFilePath: result.braintrustJsonFilePath,
-    }),
-  );
-  prompts.log.info(
-    COPY.instrumentation.localToken.gitignoreNote({
-      added: result.addedToGitignore,
-      alreadyCovered: result.alreadyCovered,
-    }),
-  );
-  return result.envFilePath;
+  const envFilePath = relative(targetDirectory, result.envFilePath);
+  const gitignoreNote = COPY.instrumentation.localToken.gitignoreNote({
+    added: result.addedToGitignore,
+    alreadyCovered: result.alreadyCovered,
+  });
+  if (gitignoreNote) clack.log.info(gitignoreNote);
+  return envFilePath;
 }
 
-async function confirmManualInstrumentation(
-  prompts: ClackWizardPrompts,
-): Promise<void> {
-  prompts.note(
+async function confirmManualInstrumentation(): Promise<void> {
+  clack.note(
     COPY.instrumentation.manual.note(
       terminalHyperlink(COPY.shared.instrumentationDocsUrl),
     ),
     COPY.instrumentation.manual.title,
   );
-  const completed = await selectBoolean(prompts, {
-    message: COPY.instrumentation.manual.completedQuestion,
-    choices: COPY.instrumentation.manual.completedChoices,
-    yesFirst: false,
-  });
-  if (!completed) {
-    prompts.cancel(WIZARD_CANCEL_MESSAGE);
-    throw new WizardCancelledError();
-  }
+  unwrap(
+    await clack.select<"confirm">({
+      message: COPY.instrumentation.manual.completedQuestion,
+      options: [
+        {
+          label: COPY.instrumentation.manual.completedChoices.confirm.label,
+          value: "confirm",
+          hint: COPY.instrumentation.manual.completedChoices.confirm.hint,
+        },
+      ],
+    }),
+  );
 }
 
 async function handleOwnAgentInstrumentation(
@@ -627,14 +649,12 @@ async function handleOwnAgentInstrumentation(
     readonly project: string;
   },
 ): Promise<void> {
-  const { prompts } = deps;
   const promptText = renderPrompt({
     projectName: args.project,
     appUrl: deps.options.appUrl,
   });
   const delivery = unwrap(
-    prompts,
-    await prompts.select<OwnAgentPromptDelivery>({
+    await clack.select<OwnAgentPromptDelivery>({
       message: COPY.instrumentation.ownAgent.deliveryQuestion,
       options: [
         {
@@ -652,65 +672,54 @@ async function handleOwnAgentInstrumentation(
   if (delivery === "clipboard") {
     try {
       await deps.writeClipboard(promptText);
-      prompts.log.success(COPY.instrumentation.ownAgent.copiedToClipboard);
+      clack.log.success(COPY.instrumentation.ownAgent.copiedToClipboard);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      prompts.log.warn(COPY.instrumentation.ownAgent.clipboardFailed(message));
-      printInstrumentationPrompt(prompts, promptText);
+      clack.log.warn(COPY.instrumentation.ownAgent.clipboardFailed(message));
+      printInstrumentationPrompt(promptText);
     }
   } else {
-    printInstrumentationPrompt(prompts, promptText);
+    printInstrumentationPrompt(promptText);
   }
 
-  const completed = await selectBoolean(prompts, {
-    message: COPY.instrumentation.ownAgent.completedQuestion,
-    choices: COPY.instrumentation.ownAgent.completedChoices,
-    yesFirst: false,
-  });
-  if (!completed) {
-    prompts.cancel(WIZARD_CANCEL_MESSAGE);
-    throw new WizardCancelledError();
-  }
-}
-
-function printInstrumentationPrompt(
-  prompts: ClackWizardPrompts,
-  promptText: string,
-): void {
-  prompts.writeRaw(
-    `\n${COPY.instrumentation.ownAgent.promptHeader}\n\n${promptText}\n\n`,
+  unwrap(
+    await clack.select<"confirm">({
+      message: COPY.instrumentation.ownAgent.completedQuestion,
+      options: [
+        {
+          label: COPY.instrumentation.ownAgent.completedChoices.confirm.label,
+          value: "confirm",
+          hint: COPY.instrumentation.ownAgent.completedChoices.confirm.hint,
+        },
+      ],
+    }),
   );
 }
 
+function printInstrumentationPrompt(promptText: string): void {
+  process.stdout.write(`\n${promptText}\n\n`);
+}
+
 async function confirmProductionApiKey(
-  prompts: ClackWizardPrompts,
   envFilePath: string | undefined,
 ): Promise<void> {
-  prompts.note(
+  clack.note(
     envFilePath
       ? COPY.productionToken.noteWithEnvFile(envFilePath)
       : COPY.productionToken.noteWithoutEnvFile,
     COPY.productionToken.title,
   );
-  const productionTokenStatus = unwrap(
-    prompts,
-    await prompts.select<"done" | "later">({
+  unwrap(
+    await clack.select<"understood">({
       message: COPY.productionToken.question,
       options: [
         {
-          label: COPY.productionToken.addedIt,
-          value: "done",
-        },
-        {
-          label: COPY.productionToken.doLater,
-          value: "later",
+          label: COPY.productionToken.understood,
+          value: "understood",
         },
       ],
     }),
   );
-  if (productionTokenStatus === "later") {
-    prompts.log.warn(COPY.productionToken.laterWarning);
-  }
 }
 
 type InstrumentationResult = {
@@ -726,15 +735,20 @@ async function runInstrumentation(
     readonly toolId: CodingToolId;
   },
 ): Promise<InstrumentationResult> {
-  const { prompts } = deps;
   const resultFilePath = allocateResultFile();
   const promptText = renderPrompt({
     projectName: args.project,
     appUrl: deps.options.appUrl,
   });
   const toolLabel = codingToolLabel(args.toolId);
-  const renderer = new ClackToolRenderer(prompts, toolLabel);
+  const spinner = clack.spinner({ indicator: "timer" });
+  const renderer = new ClackToolRenderer(toolLabel);
+  renderer.start();
   let toolResult: CodingToolRunResult;
+
+  setTimeout(() => {
+    spinner.start(COPY.instrumentation.builtIn.running(toolLabel));
+  }, 50);
   try {
     toolResult = await deps.codingTools.run({
       id: args.toolId,
@@ -750,18 +764,20 @@ async function runInstrumentation(
   } catch (error) {
     await renderer.error(COPY.instrumentation.builtIn.codingAgentFailed);
     throw error;
+  } finally {
+    spinner.clear();
   }
 
   if (toolResult.exitCode !== 0) {
     await renderer.error(
       COPY.instrumentation.builtIn.toolExited(toolLabel, toolResult.exitCode),
     );
-    prompts.log.warn(
+    clack.log.warn(
       COPY.instrumentation.builtIn.codingToolExited(toolResult.exitCode),
     );
   } else if (toolResult.finalText.includes("INSTRUMENTATION_INCOMPLETE")) {
     await renderer.error(COPY.instrumentation.builtIn.incompleteRenderer);
-    prompts.log.warn(COPY.instrumentation.builtIn.incompleteWarning);
+    clack.log.warn(COPY.instrumentation.builtIn.incompleteWarning);
   } else if (toolResult.finalText.includes("INSTRUMENTATION_COMPLETE")) {
     await renderer.success(COPY.instrumentation.builtIn.complete);
   } else {
@@ -779,7 +795,6 @@ async function runInstrumentation(
 
 export type DefaultDepsArgs = {
   readonly options: WizardOptions;
-  readonly prompts: ClackWizardPrompts;
   readonly cwd?: string;
   readonly env?: NodeJS.ProcessEnv;
 };
@@ -808,7 +823,6 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
     cwd,
     env,
     options: args.options,
-    prompts: args.prompts,
     loginWithWizardSession: (loginArgs) =>
       loginWithWizardSessionRequest({
         appUrl: args.options.appUrl,

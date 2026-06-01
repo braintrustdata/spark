@@ -2,6 +2,8 @@ import type { BraintrustCliContext } from "./braintrust-cli";
 
 const INSTRUMENTATION_DOCS_URL =
   "https://www.braintrust.dev/docs/instrument/trace-llm-calls";
+const SETUP_PLAN =
+  "You'll sign in with Braintrust, choose an org and project, save an API key for local testing, set up the Braintrust CLI, then choose how to add instrumentation.";
 const BRAINTRUST_CLI_CONTEXT_FALLBACKS = {
   profile: "no profile",
   org: "no org",
@@ -15,10 +17,12 @@ export const CLACK_WIZARD_COPY = {
   },
 
   welcome: {
-    intro: "Welcome to the Braintrust setup wizard",
-    setupPlanTitle: "Setup plan",
-    setupPlan:
-      "You'll sign in with Braintrust, choose an org and project, save an API key for local testing, set up the Braintrust CLI, then choose how to add instrumentation.",
+    intro: [
+      "Welcome to the Braintrust setup wizard",
+      "",
+      "Setup plan:",
+      SETUP_PLAN,
+    ].join("\n"),
   },
 
   gitRepository: {
@@ -97,11 +101,8 @@ export const CLACK_WIZARD_COPY = {
     },
     installing: "Installing Braintrust CLI...",
     updating: "Updating Braintrust CLI...",
-    installStopped: "Braintrust CLI install stopped.",
-    updateStopped: "Braintrust CLI update stopped.",
-    updated: "Updated Braintrust CLI.",
-    installed: "Installed Braintrust CLI.",
-    configured: "Configured Braintrust CLI.",
+    checkingContext: "Checking Braintrust CLI context...",
+    configuringContext: "Configuring Braintrust CLI context...",
     updateFailed: (message: string) =>
       `Could not update Braintrust CLI: ${message}`,
     installFailed: (message: string) =>
@@ -119,16 +120,14 @@ export const CLACK_WIZARD_COPY = {
       `Switch Braintrust CLI from ${formatBraintrustCliContext(args.currentContext)} to ${formatBraintrustCliContext(args.targetContext)}?`,
     switchContextChoices: {
       yes: {
-        label: "Yes",
+        label: "Yes (recommended)",
         hint: "Use this project",
       },
       no: {
-        label: "No (recommended)",
+        label: "No",
         hint: "Keep existing context",
       },
     },
-    leavingContextUnchanged:
-      "Leaving existing Braintrust CLI context unchanged.",
     contextFallbacks: {
       ...BRAINTRUST_CLI_CONTEXT_FALLBACKS,
     },
@@ -151,7 +150,20 @@ export const CLACK_WIZARD_COPY = {
       },
     },
     builtIn: {
-      usingTool: (label: string) => `Using ${label} for instrumentation.`,
+      determiningAvailable: "Determining available coding agents...",
+      running: (label: string) => `Running ${label}...`,
+      proceedQuestion:
+        "This setup wizard will now invoke a coding agent. Proceed?",
+      proceedChoices: {
+        yes: {
+          label: "Yes, proceed",
+          hint: "Run the selected coding agent",
+        },
+        no: {
+          label: "abort",
+          hint: "Choose another setup path",
+        },
+      },
       toolQuestion: "Which coding agent should Braintrust Setup use?",
       noUsableToolsWarning: (toolMessages: readonly string[]) =>
         ["No usable coding agents found.", ...toolMessages].join("\n"),
@@ -186,20 +198,16 @@ export const CLACK_WIZARD_COPY = {
       replaceQuestion: "Replace local Braintrust token files?",
       replaceChoices: {
         yes: {
-          label: "Yes",
+          label: "Yes (recommended)",
           hint: "Use this project key",
         },
         no: {
-          label: "No (recommended)",
+          label: "No",
           hint: "Keep existing file",
         },
       },
       outsideGitRepo: (apiKey: string) =>
         `BRAINTRUST_API_KEY=${apiKey}\nNot in a git repo — set this in your environment manually.`,
-      wroteTokenFiles: (paths: {
-        readonly envFilePath: string;
-        readonly braintrustJsonFilePath: string;
-      }) => `Wrote ${paths.envFilePath} and ${paths.braintrustJsonFilePath}`,
       keptTokenFiles: () =>
         "Kept existing local Braintrust token files unchanged.",
       gitignoreNote: (args: {
@@ -210,7 +218,7 @@ export const CLACK_WIZARD_COPY = {
           return "Updated .gitignore for local Braintrust token files.";
         }
         if (args.alreadyCovered) {
-          return ".gitignore already covers local Braintrust token files.";
+          return undefined;
         }
         return ".gitignore unchanged.";
       },
@@ -225,13 +233,9 @@ export const CLACK_WIZARD_COPY = {
         ].join("\n"),
       completedQuestion: "Braintrust instrumentation completed?",
       completedChoices: {
-        yes: {
-          label: "Yes",
+        confirm: {
+          label: "confirm",
           hint: "Continue setup",
-        },
-        no: {
-          label: "No",
-          hint: "Cancel wizard",
         },
       },
     },
@@ -243,18 +247,14 @@ export const CLACK_WIZARD_COPY = {
       copiedToClipboard: "Copied instrumentation prompt to clipboard.",
       clipboardFailed: (message: string) =>
         `Could not copy the instrumentation prompt to the clipboard: ${message}`,
-      completedQuestion: "Coding agent completed Braintrust instrumentation?",
+      completedQuestion:
+        "Give the above prompt to your coding agent and proceed when the agent has completed the task.",
       completedChoices: {
-        yes: {
-          label: "Yes",
+        confirm: {
+          label: "Confirm and proceed",
           hint: "Continue setup",
         },
-        no: {
-          label: "No",
-          hint: "Cancel wizard",
-        },
       },
-      promptHeader: "Braintrust instrumentation prompt:",
     },
   },
 
@@ -269,10 +269,7 @@ export const CLACK_WIZARD_COPY = {
     noteWithoutEnvFile:
       "Add the BRAINTRUST_API_KEY token to your deployment platform's environment variables so tracing works in production.",
     question: "Have you added BRAINTRUST_API_KEY to your deployment platform?",
-    addedIt: "I added it",
-    doLater: "I will do that later",
-    laterWarning:
-      "Do not forget to add BRAINTRUST_API_KEY to production. Braintrust tracing will not work in production without it.",
+    understood: "Understood",
   },
 
   outro: {

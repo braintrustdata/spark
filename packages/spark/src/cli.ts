@@ -1,5 +1,3 @@
-import * as clackPrompts from "@clack/prompts";
-
 import {
   buildDefaultDeps,
   runClackWizard,
@@ -9,19 +7,7 @@ import { parseArgs } from "./options";
 
 const options = await parseArgs(process.argv.slice(2), process.env);
 
-const prompts = {
-  ...clackPrompts,
-  writeRaw: (message: string) => {
-    process.stdout.write(message);
-  },
-};
-
-const deps = buildDefaultDeps({
-  options,
-  prompts: prompts as unknown as Parameters<
-    typeof buildDefaultDeps
-  >[0]["prompts"],
-});
+const deps = buildDefaultDeps({ options });
 
 try {
   await runClackWizard(deps);
