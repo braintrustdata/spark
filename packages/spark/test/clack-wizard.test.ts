@@ -614,6 +614,20 @@ describe("runClackWizard", () => {
     expect(events).toContain("taskLog.success:Instrumentation complete.");
   });
 
+  it("does not start the delayed coding agent spinner after a fast run", async () => {
+    const { events } = createPrompts({
+      selects: ["yes", "no", "first", "proceed", "understood"],
+    });
+    const deps = buildDeps();
+
+    await runClackWizard(deps);
+    await new Promise<void>((resolve) => setTimeout(resolve, 60));
+
+    expect(events).not.toContain(
+      "spinner.start:Checking Claude Code can run...",
+    );
+  });
+
   it("passes browser auth mode based on the account answer", async () => {
     const cases = [
       { answer: true, expectedAuthMode: "signin" },
@@ -779,9 +793,25 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "spinner.message:Configuring Braintrust CLI context...",
     );
+    expect(events).toContain(
+      "spinner.message:Determining available coding agents...",
+    );
     expect(events).toContain("spinner.clear");
     expect(events).not.toContain("spinner.stop:Installed Braintrust CLI.");
     expect(events).not.toContain("success:Configured Braintrust CLI.");
+    const configureSpinnerIndex = events.indexOf(
+      "spinner.message:Configuring Braintrust CLI context...",
+    );
+    const codingAgentSpinnerIndex = events.indexOf(
+      "spinner.message:Determining available coding agents...",
+    );
+    expect(codingAgentSpinnerIndex).toBeGreaterThan(configureSpinnerIndex);
+    expect(
+      events.slice(configureSpinnerIndex, codingAgentSpinnerIndex),
+    ).not.toContain("spinner.clear");
+    expect(events).not.toContain(
+      "spinner.start:Determining available coding agents...",
+    );
     expect(
       events.indexOf("spinner.message:Checking Braintrust CLI context..."),
     ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
@@ -893,9 +923,25 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "spinner.message:Configuring Braintrust CLI context...",
     );
+    expect(events).toContain(
+      "spinner.message:Determining available coding agents...",
+    );
     expect(events).toContain("spinner.clear");
     expect(events).not.toContain("spinner.stop:Updated Braintrust CLI.");
     expect(events).not.toContain("success:Configured Braintrust CLI.");
+    const configureSpinnerIndex = events.indexOf(
+      "spinner.message:Configuring Braintrust CLI context...",
+    );
+    const codingAgentSpinnerIndex = events.indexOf(
+      "spinner.message:Determining available coding agents...",
+    );
+    expect(codingAgentSpinnerIndex).toBeGreaterThan(configureSpinnerIndex);
+    expect(
+      events.slice(configureSpinnerIndex, codingAgentSpinnerIndex),
+    ).not.toContain("spinner.clear");
+    expect(events).not.toContain(
+      "spinner.start:Determining available coding agents...",
+    );
     expect(calls).toEqual(["update:/bin/bt", "status:/bin/bt", "login"]);
   });
 

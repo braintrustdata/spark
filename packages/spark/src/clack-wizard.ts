@@ -83,6 +83,29 @@ const MANUAL_INSTRUMENTATION_CHOICE: ManualInstrumentationChoice = {
   label: COPY.instrumentation.modes.manual.label,
 };
 
+class WizardStepSpinner {
+  private spinner: ReturnType<typeof clack.spinner> | undefined;
+  private active = false;
+
+  update(message: string): void {
+    if (this.active) {
+      this.spinner!.message(message);
+      return;
+    }
+
+    this.spinner ??= clack.spinner();
+    this.spinner.start(message);
+    this.active = true;
+  }
+
+  clear(): void {
+    if (!this.active) return;
+
+    this.spinner!.clear();
+    this.active = false;
+  }
+}
+
 type BooleanSelectChoices = {
   readonly yes: {
     readonly label: string;
@@ -198,9 +221,14 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
   const envFilePath = await writeLocalEnvBraintrust(deps, session.apiKey);
 
-  await handleBraintrustCliSetup(deps, session);
-
-  const codingToolStatuses = await preflightCodingTools(deps);
+  const setupSpinner = new WizardStepSpinner();
+  let codingToolStatuses: readonly CodingToolStatus[];
+  try {
+    await handleBraintrustCliSetup(deps, session, setupSpinner);
+    codingToolStatuses = await preflightCodingTools(deps, setupSpinner);
+  } finally {
+    setupSpinner.clear();
+  }
   const hasUsableCodingTool = codingToolStatuses.some(
     (status) => status.usable,
   );
@@ -360,25 +388,10 @@ async function selectInstrumentationMode(args: {
 async function handleBraintrustCliSetup(
   deps: WizardDeps,
   session: WizardSessionCompleteResult,
+  spinner: WizardStepSpinner,
 ): Promise<void> {
   let discovery = await deps.braintrustCli.discover();
   let commandPath = discovery.commandPath;
-  const spinner = clack.spinner();
-  let spinnerActive = false;
-  const updateSpinner = (message: string) => {
-    if (spinnerActive) {
-      spinner.message(message);
-    } else {
-      spinner.start(message);
-      spinnerActive = true;
-    }
-  };
-  const clearSpinner = () => {
-    if (spinnerActive) {
-      spinner.clear();
-      spinnerActive = false;
-    }
-  };
 
   if (discovery.installed) {
     const shouldUpdate = await selectBoolean({
@@ -387,13 +400,13 @@ async function handleBraintrustCliSetup(
       yesFirst: true,
     });
     if (shouldUpdate && commandPath) {
-      updateSpinner(COPY.braintrustCli.updating);
+      spinner.update(COPY.braintrustCli.updating);
       try {
         await deps.braintrustCli.update(commandPath);
         discovery = await deps.braintrustCli.discover();
         commandPath = discovery.commandPath ?? commandPath;
       } catch (error) {
-        clearSpinner();
+        spinner.clear();
         clack.log.warn(
           COPY.braintrustCli.updateFailed(summarizeBraintrustCliError(error)),
         );
@@ -407,11 +420,11 @@ async function handleBraintrustCliSetup(
     });
     if (!shouldInstall) return;
 
-    updateSpinner(COPY.braintrustCli.installing);
+    spinner.update(COPY.braintrustCli.installing);
     try {
       await deps.braintrustCli.install();
     } catch (error) {
-      clearSpinner();
+      spinner.clear();
       clack.log.warn(
         COPY.braintrustCli.installFailed(summarizeBraintrustCliError(error)),
       );
@@ -421,7 +434,7 @@ async function handleBraintrustCliSetup(
     discovery = await deps.braintrustCli.discover();
     commandPath = discovery.commandPath;
     if (!discovery.installed || !commandPath) {
-      clearSpinner();
+      spinner.clear();
       clack.log.warn(COPY.braintrustCli.installedButNotFound);
       return;
     }
@@ -430,11 +443,11 @@ async function handleBraintrustCliSetup(
   if (!commandPath) return;
 
   let currentContext: BraintrustCliContext;
-  updateSpinner(COPY.braintrustCli.checkingContext);
+  spinner.update(COPY.braintrustCli.checkingContext);
   try {
     currentContext = await deps.braintrustCli.status(commandPath);
   } catch (error) {
-    clearSpinner();
+    spinner.clear();
     clack.log.warn(
       COPY.braintrustCli.statusFailed(summarizeBraintrustCliError(error)),
     );
@@ -447,7 +460,7 @@ async function handleBraintrustCliSetup(
     project: session.projectName,
   };
   if (braintrustCliContextConflicts(currentContext, targetContext)) {
-    clearSpinner();
+    spinner.clear();
     const shouldSwitch = await selectBoolean({
       message: COPY.braintrustCli.switchContextQuestion({
         currentContext,
@@ -461,7 +474,7 @@ async function handleBraintrustCliSetup(
     }
   }
 
-  updateSpinner(COPY.braintrustCli.configuringContext);
+  spinner.update(COPY.braintrustCli.configuringContext);
   try {
     await deps.braintrustCli.loginAndSwitch(commandPath, {
       apiKey: session.apiKey,
@@ -470,9 +483,8 @@ async function handleBraintrustCliSetup(
       orgName: session.orgName,
       projectName: session.projectName,
     });
-    clearSpinner();
   } catch (error) {
-    clearSpinner();
+    spinner.clear();
     clack.log.warn(
       COPY.braintrustCli.configureFailed(summarizeBraintrustCliError(error)),
     );
@@ -500,9 +512,9 @@ function braintrustCliContextConflicts(
 
 async function preflightCodingTools(
   deps: WizardDeps,
+  spinner: WizardStepSpinner,
 ): Promise<readonly CodingToolStatus[]> {
-  const spinner = clack.spinner();
-  spinner.start(COPY.instrumentation.builtIn.determiningAvailable);
+  spinner.update(COPY.instrumentation.builtIn.determiningAvailable);
   try {
     const statuses = await deps.codingTools.discover();
     return await Promise.all(
@@ -742,9 +754,9 @@ async function runInstrumentation(
   renderer.start();
   let toolResult: CodingToolRunResult;
 
-  setTimeout(() => {
+  const spinnerDelay = setTimeout(() => {
     spinner.start(COPY.instrumentation.builtIn.running(toolLabel));
-  }, 50);
+  }, 150);
   try {
     toolResult = await deps.codingTools.run({
       id: args.toolId,
@@ -761,6 +773,7 @@ async function runInstrumentation(
     await renderer.error(COPY.instrumentation.builtIn.codingAgentFailed);
     throw error;
   } finally {
+    clearTimeout(spinnerDelay);
     spinner.clear();
   }
 
