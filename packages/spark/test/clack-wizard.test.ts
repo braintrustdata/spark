@@ -362,6 +362,13 @@ function buildDeps(
           );
           expect(prompt).toContain("Do not use the Braintrust CLI (`bt`).");
           expect(prompt).not.toContain("Unattended mode (YOLO)");
+          onEvent({
+            type: "reading",
+            message: "Reading package.json",
+            target: "package.json",
+            toolInput: "file_path: package.json",
+            toolName: "Read",
+          });
           onEvent({ type: "thinking", message: "Thinking..." });
           onEvent({
             type: "editing",
@@ -485,7 +492,9 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "taskLog:Running Claude Code to instrument your application:0:false",
     );
-    expect(events).toContain("taskLog.message:edit package.json");
+    expect(events).toContain("taskLog.message:read: package.json");
+    expect(events).not.toContain("taskLog.message:thinking");
+    expect(events).toContain("taskLog.message:write: package.json");
     expect(events).toContain("taskLog.success:Instrumentation complete.");
     expect(readFileSync(join(deps.cwd, ".env.braintrust"), "utf8")).toBe(
       ENV_BRAINTRUST_FILE_CONTENT,
@@ -599,7 +608,9 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "taskLog:Running Claude Code to instrument your application:0:false",
     );
-    expect(events).toContain("taskLog.message:edit package.json");
+    expect(events).toContain("taskLog.message:read: package.json");
+    expect(events).not.toContain("taskLog.message:thinking");
+    expect(events).toContain("taskLog.message:write: package.json");
     expect(events).toContain("taskLog.success:Instrumentation complete.");
   });
 

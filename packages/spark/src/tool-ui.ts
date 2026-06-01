@@ -28,7 +28,13 @@ export class ClackToolRenderer {
   }
 
   event(event: CodingToolEvent) {
-    if (event.type === "completed" || event.type === "failed") return;
+    if (
+      event.type === "completed" ||
+      event.type === "failed" ||
+      event.type === "thinking"
+    ) {
+      return;
+    }
 
     const line = eventLine(event);
     if (line === this.lastLine) return;
@@ -74,12 +80,11 @@ class TaskLogCodingAgentOutput implements CodingAgentOutput {
 }
 
 function eventLine(event: CodingToolEvent): string {
-  if (event.type === "thinking") return "thinking";
   if (event.type === "editing") {
     const target =
       eventTarget(event) ??
       toolInputValue(event.toolInput, ["file_path", "path", "notebook_path"]);
-    return actionLine("edit", target ?? event.message);
+    return actionLine("write", target ?? event.message);
   }
   if (event.type === "reading") {
     const target =
@@ -102,7 +107,7 @@ function eventLine(event: CodingToolEvent): string {
 
 function actionLine(action: string, value: string | undefined): string {
   const text = value ? sanitizeText(value, 140) : "";
-  return text ? `${action} ${text}` : action;
+  return text ? `${action}: ${text}` : action;
 }
 
 function eventTarget(event: CodingToolEvent): string | undefined {
