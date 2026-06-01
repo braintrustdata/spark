@@ -13,7 +13,7 @@ export function renderPrompt(opts: {
 - In terms of instrumentation, always prefer adding auto-instrumentation over manual wrappers.
 - For the SDK initialization configure the project name "${opts.projectName || ""}".
 - Do not run application code, just do code changes to instrument the application.
-- Also install the SDK or multiple SDKs if necessary. Always use the latest version. Do web research or web requests to look up the latest version. Make sure to use the right package manager that the project is already using. Also look upwards in the directory structure to check whether you're in a mono-repo or not. Ideally go to the root of the git repository if present to verify, but only instrument applications in or below the current working directory. Verify that the SDK has actually been installed.
+- Also install the SDK or multiple SDKs if necessary. Always use the latest version. Do web research or web requests to look up the latest version and install that version - don't just pin to e.g. \`latest\`. Make sure to use the right package manager that the project is already using. Also look upwards in the directory structure to check whether you're in a mono-repo or not. Ideally go to the root of the git repository if present to verify, but only instrument applications in or below the current working directory. Verify that the SDK has actually been installed.
 - Be as concise and readable as possible with your code changes.
 - Do not break any application code. 
 - Do not modify any application code in any meaningful way.

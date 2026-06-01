@@ -22,6 +22,9 @@ export class ClackToolRenderer {
     if (!this.output) {
       const title = `Running ${this.toolLabel} to instrument your application`;
       this.output = new TaskLogCodingAgentOutput(title);
+      setTimeout(() => {
+        void this.output?.message("Starting agent...");
+      }, 10);
     }
 
     return this.output;
