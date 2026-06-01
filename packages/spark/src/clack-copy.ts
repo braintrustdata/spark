@@ -1,9 +1,5 @@
 import type { BraintrustCliContext } from "./braintrust-cli";
 
-const INSTRUMENTATION_DOCS_URL =
-  "https://www.braintrust.dev/docs/instrument/trace-llm-calls";
-const SETUP_PLAN =
-  "You'll sign in with Braintrust, choose an org and project, save an API key for local testing, set up the Braintrust CLI, then choose how to add instrumentation.";
 const BRAINTRUST_CLI_CONTEXT_FALLBACKS = {
   profile: "no profile",
   org: "no org",
@@ -13,26 +9,22 @@ const BRAINTRUST_CLI_CONTEXT_FALLBACKS = {
 export const CLACK_WIZARD_COPY = {
   shared: {
     cancelMessage: "Wizard cancelled.",
-    instrumentationDocsUrl: INSTRUMENTATION_DOCS_URL,
+    instrumentationDocsUrl:
+      "https://www.braintrust.dev/docs/instrument/trace-llm-calls",
   },
 
   welcome: {
-    intro: [
-      "Welcome to the Braintrust setup wizard",
-      "",
-      "Setup plan:",
-      SETUP_PLAN,
-    ].join("\n"),
+    intro: "Braintrust Setup Wizard",
   },
 
   gitRepository: {
     outsideRepoWarning:
-      "Heads up: this folder is not a git repository. The wizard may edit files; consider running it inside a checked-in repo.",
+      "Warning: You are running this wizard inside a folder that is not a git repository. The wizard may edit files.",
     continueOutsideRepoQuestion: "Continue without a git repository?",
     continueOutsideRepoChoices: {
       yes: {
         label: "Yes",
-        hint: "Continue setup",
+        hint: "Continue without git",
       },
       no: {
         label: "No (recommended)",
@@ -50,7 +42,7 @@ export const CLACK_WIZARD_COPY = {
       },
       no: {
         label: "No",
-        hint: "Create account",
+        hint: "Sign up",
       },
     },
     browserLoginInfo: (args: {
@@ -62,16 +54,14 @@ export const CLACK_WIZARD_COPY = {
         "",
         "If your browser didn't open automatically, open the link above to sign in.",
         `Verification code: ${args.verificationCode}`,
-        "",
-        "Choose the org and project you want to use; the wizard will resume here.",
       ].join("\n"),
-    waitingForBrowser: "Waiting for login in browser...",
+    waitingForBrowser: "Waiting for you to sign in via the browser...",
     browserSetupComplete: (args: {
       readonly orgName: string;
       readonly projectName: string;
     }) =>
       `Browser setup complete. (org: ${args.orgName}, project: ${args.projectName})`,
-    browserSetupStopped: "Browser setup stopped.",
+    browserSetupStopped: "Browser setup cancelled.",
   },
 
   braintrustCli: {
@@ -80,15 +70,13 @@ export const CLACK_WIZARD_COPY = {
     installChoices: {
       yes: {
         label: "Yes (recommended)",
-        hint: "Install CLI",
       },
       no: {
         label: "No",
-        hint: "Skip installation",
+        hint: "Skip CLI installation",
       },
     },
-    updateQuestion: (installedLabel: string) =>
-      `Update Braintrust CLI? (${installedLabel} installed)`,
+    updateQuestion: "Update Braintrust CLI to the latest version?",
     updateChoices: {
       yes: {
         label: "Yes (recommended)",
@@ -117,15 +105,15 @@ export const CLACK_WIZARD_COPY = {
       readonly currentContext: BraintrustCliContext;
       readonly targetContext: BraintrustCliContext;
     }) =>
-      `Switch Braintrust CLI from ${formatBraintrustCliContext(args.currentContext)} to ${formatBraintrustCliContext(args.targetContext)}?`,
+      `Switch Braintrust CLI login profile from ${formatBraintrustCliContext(args.currentContext)} to ${formatBraintrustCliContext(args.targetContext)}?`,
     switchContextChoices: {
       yes: {
         label: "Yes (recommended)",
-        hint: "Use this project",
+        hint: "Use project selected in browser",
       },
       no: {
         label: "No",
-        hint: "Keep existing context",
+        hint: "Keep current profile",
       },
     },
     contextFallbacks: {
@@ -138,29 +126,29 @@ export const CLACK_WIZARD_COPY = {
     modes: {
       builtIn: {
         label: "Use built-in coding agent",
-        hint: "This wizard will launch a coding agent for you that will add instrumentation to your application (supports Claude Code and Codex). Careful: This will run the chosen tool in yolo mode (full permissions).",
+        hint: "Launch a locally installed coding agent",
       },
       ownAgent: {
         label: "Use own coding agent",
-        hint: "You will receive a prompt to instrument your application with your own coding agent.",
+        hint: "Use a suggested prompt to pass to your own coding agent",
       },
       manual: {
         label: "Set up manually",
-        hint: "Set up tracing for your application using instructions from the Braintrust docs.",
+        hint: "Use the Braintrust docs",
       },
     },
     builtIn: {
-      determiningAvailable: "Determining available coding agents...",
+      determiningAvailable: "Scanning for available coding agents...",
       running: (label: string) => `Running ${label}...`,
       proceedQuestion:
-        "This setup wizard will now invoke a coding agent. Proceed?",
+        "This setup wizard will now invoke a coding agent with full permissions. Proceed?",
       proceedChoices: {
         yes: {
-          label: "Yes, proceed",
-          hint: "Run the selected coding agent",
+          label: "Confirm",
+          hint: "Run the coding agent",
         },
         no: {
-          label: "abort",
+          label: "Abort",
           hint: "Choose another setup path",
         },
       },
@@ -183,7 +171,7 @@ export const CLACK_WIZARD_COPY = {
       toolExited: (toolLabel: string, exitCode: number) =>
         `${toolLabel} exited with code ${exitCode}.`,
       codingToolExited: (exitCode: number) =>
-        `Coding tool exited with code ${exitCode}.`,
+        `Coding agent exited with code ${exitCode}.`,
       incompleteRenderer: "Instrumentation incomplete.",
       incompleteWarning: "The coding tool reported incomplete instrumentation.",
       complete: "Instrumentation complete.",
