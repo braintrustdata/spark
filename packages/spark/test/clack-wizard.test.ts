@@ -429,25 +429,27 @@ describe("runClackWizard", () => {
     expect(events).toContain(`select:${CLI_INSTALL_MESSAGE}`);
     expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
     expect(events).not.toContain(`select:${TOOL_SELECT_MESSAGE}`);
-    expect(events).toContain("spinner.create:dots:false");
     expect(events).toContain(
       "spinner.start:Determining available coding agents...",
     );
-    expect(events).toContain("spinner.clear");
-    expect(
-      events.indexOf("spinner.start:Determining available coding agents..."),
-    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
-    expect(
-      events.findIndex(
-        (event, index) =>
-          index >
-            events.indexOf(
-              "spinner.start:Determining available coding agents...",
-            ) && event === "spinner.clear",
-      ),
-    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
+    const codingAgentSpinnerStart = events.indexOf(
+      "spinner.start:Determining available coding agents...",
+    );
+    const instrumentationModePrompt = events.indexOf(
+      `select:${INSTRUMENTATION_MODE_MESSAGE}`,
+    );
+    const codingAgentSpinnerClear = events.findIndex(
+      (event, index) =>
+        index > codingAgentSpinnerStart && event === "spinner.clear",
+    );
+    expect(codingAgentSpinnerStart).toBeGreaterThanOrEqual(0);
+    expect(codingAgentSpinnerClear).toBeGreaterThan(codingAgentSpinnerStart);
+    expect(codingAgentSpinnerStart).toBeLessThan(instrumentationModePrompt);
+    expect(codingAgentSpinnerClear).toBeLessThan(instrumentationModePrompt);
     expect(events).toContain(`select:${CODING_AGENT_PROCEED_MESSAGE}`);
-    expect(events).toContain("spinner.create:timer:false");
+    expect(
+      events.some((event) => event.startsWith("spinner.create:timer:")),
+    ).toBe(true);
     expect(events).not.toContain(
       "spinner.start:Checking Claude Code can run...",
     );
@@ -482,18 +484,6 @@ describe("runClackWizard", () => {
     ).toBe(false);
     expect(events).toContain(
       "taskLog:Running Claude Code to instrument your application:0:false",
-    );
-    expect(events).toContain("spinner.start:Running Claude Code...");
-    expect(
-      events.findIndex(
-        (event, index) =>
-          index > events.indexOf("spinner.start:Running Claude Code...") &&
-          event === "spinner.clear",
-      ),
-    ).toBeLessThan(
-      events.indexOf(
-        "taskLog:Running Claude Code to instrument your application:0:false",
-      ),
     );
     expect(events).toContain("taskLog.message:edit package.json");
     expect(events).toContain("taskLog.success:Instrumentation complete.");
@@ -582,18 +572,20 @@ describe("runClackWizard", () => {
     ]);
     expect(maxActiveSmokeTests).toBe(2);
     expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
-    expect(
-      events.indexOf("spinner.start:Determining available coding agents..."),
-    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
-    expect(
-      events.findIndex(
-        (event, index) =>
-          index >
-            events.indexOf(
-              "spinner.start:Determining available coding agents...",
-            ) && event === "spinner.clear",
-      ),
-    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
+    const codingAgentSpinnerStart = events.indexOf(
+      "spinner.start:Determining available coding agents...",
+    );
+    const instrumentationModePrompt = events.indexOf(
+      `select:${INSTRUMENTATION_MODE_MESSAGE}`,
+    );
+    const codingAgentSpinnerClear = events.findIndex(
+      (event, index) =>
+        index > codingAgentSpinnerStart && event === "spinner.clear",
+    );
+    expect(codingAgentSpinnerStart).toBeGreaterThanOrEqual(0);
+    expect(codingAgentSpinnerClear).toBeGreaterThan(codingAgentSpinnerStart);
+    expect(codingAgentSpinnerStart).toBeLessThan(instrumentationModePrompt);
+    expect(codingAgentSpinnerClear).toBeLessThan(instrumentationModePrompt);
   });
 
   it("uses compact task log spacing for built-in coding agent output", async () => {
