@@ -1,14 +1,14 @@
-import { Box, Text } from "ink";
-import { useEffect, useState } from "react";
+import { Box, Text, useAnimation } from "ink";
 
 const EMPTY_BLOCK = " ";
 const LEFT_BLOCK = "▌";
 const RIGHT_BLOCK = "▐";
 const LEFT_SUBCOLUMN = 0b01;
 const RIGHT_SUBCOLUMN = 0b10;
-const STRIP_TICK_MS = 80;
+const TARGET_FRAME_RATE = 60;
+const STRIP_FRAME_MS = Math.ceil(1000 / TARGET_FRAME_RATE);
+const STRIP_SUBCOLUMN_STEP_MS = 64;
 const BASE_LINE_SPACING = 5;
-const STRIP_SUBCOLUMN_SPEED_SCALE = BASE_LINE_SPACING * 2;
 const STRIP_PERIOD = 320;
 const FIRST_BLOCK_GAP_ROW = 1;
 const LAST_BLOCK_GAP_ROW = 4;
@@ -22,9 +22,11 @@ const EDGE_ROW_DENSITY_VARIATION = 0.12;
 const MIDDLE_ROW_MIN_DENSITY = 0.68;
 const MIDDLE_ROW_DENSITY_VARIATION = 0.22;
 const FEATURED_ROW = 2;
-const FEATURED_ROW_SPEED = 1.35;
-const BASE_ROW_SPEED = 0.78;
-const ROW_SPEED_VARIATION = 0.28;
+const FEATURED_ROW_SPEED = 0.78;
+// Keep row speed multipliers at or below 1 so variation does not increase the
+// fastest strip speed beyond the baseline half-cell cadence.
+const BASE_ROW_SPEED = 0.24;
+const ROW_SPEED_VARIATION = 0.44;
 
 type SignalStripsProps = {
   readonly columns: number;
@@ -129,12 +131,8 @@ function rowPhase(row: number) {
   return Math.floor(hashAt(row, 0, 421) * BASE_LINE_SPACING);
 }
 
-function worldSubColumn(column: number, row: number, elapsedMs: number) {
-  const elapsedSeconds = elapsedMs / 1000;
-  const drift =
-    Math.floor(elapsedSeconds * rowSpeed(row) * STRIP_SUBCOLUMN_SPEED_SCALE) *
-      rowDirection(row) +
-    row * 53;
+function worldSubColumn(column: number, row: number, motionStep: number) {
+  const drift = motionStep * rowDirection(row) + row * 53;
 
   return positiveModulo(column + drift, STRIP_PERIOD);
 }
@@ -157,16 +155,39 @@ function shouldRenderLine(lineIndex: number, row: number, rows: number) {
   );
 }
 
+function lineAdvanceThreshold(lineIndex: number, row: number) {
+  return hashAt(lineIndex, row, 3527);
+}
+
 function hasLineAt(
   column: number,
   row: number,
   rows: number,
-  elapsedMs: number,
+  motionFrame: number,
 ) {
-  const worldColumn = worldSubColumn(column, row, elapsedMs);
-  const lineIndex = lineIndexAt(worldColumn, row);
+  const currentStep = Math.floor(motionFrame);
+  const progress = motionFrame - currentStep;
+  const currentWorldColumn = worldSubColumn(column, row, currentStep);
+  const currentLineIndex = lineIndexAt(currentWorldColumn, row);
 
-  return lineIndex !== null && shouldRenderLine(lineIndex, row, rows);
+  // Spread each half-cell step across the 60fps frames so the whole row does
+  // not hold still and then jump at the step boundary.
+  if (
+    currentLineIndex !== null &&
+    shouldRenderLine(currentLineIndex, row, rows) &&
+    progress <= lineAdvanceThreshold(currentLineIndex, row)
+  ) {
+    return true;
+  }
+
+  const nextWorldColumn = worldSubColumn(column, row, currentStep + 1);
+  const nextLineIndex = lineIndexAt(nextWorldColumn, row);
+
+  return (
+    nextLineIndex !== null &&
+    shouldRenderLine(nextLineIndex, row, rows) &&
+    progress > lineAdvanceThreshold(nextLineIndex, row)
+  );
 }
 
 function blockForMask(mask: number) {
@@ -189,14 +210,17 @@ function buildStripLine(
   columns: number,
   row: number,
   rows: number,
-  elapsedMs: number,
+  motionFrame: number,
 ) {
   let line = "";
+  const rowMotionFrame = motionFrame * rowSpeed(row);
 
   for (let column = 0; column < columns; column += 1) {
     const mask =
-      (hasLineAt(column * 2, row, rows, elapsedMs) ? LEFT_SUBCOLUMN : 0) |
-      (hasLineAt(column * 2 + 1, row, rows, elapsedMs) ? RIGHT_SUBCOLUMN : 0);
+      (hasLineAt(column * 2, row, rows, rowMotionFrame) ? LEFT_SUBCOLUMN : 0) |
+      (hasLineAt(column * 2 + 1, row, rows, rowMotionFrame)
+        ? RIGHT_SUBCOLUMN
+        : 0);
 
     line += blockForMask(mask);
   }
@@ -205,24 +229,14 @@ function buildStripLine(
 }
 
 export function SignalStrips({ columns, color, rows }: SignalStripsProps) {
-  const [elapsedMs, setElapsedMs] = useState(0);
-
-  useEffect(() => {
-    const startTime = Date.now();
-    const interval = setInterval(() => {
-      setElapsedMs(Date.now() - startTime);
-    }, STRIP_TICK_MS);
-
-    return () => {
-      clearInterval(interval);
-    };
-  }, []);
+  const { time } = useAnimation({ interval: STRIP_FRAME_MS });
+  const motionFrame = time / STRIP_SUBCOLUMN_STEP_MS;
 
   return (
     <Box flexDirection="column" width={columns}>
       {Array.from({ length: rows }, (_, row) => (
         <Text color={color} key={row}>
-          {buildStripLine(columns, row, rows, elapsedMs)}
+          {buildStripLine(columns, row, rows, motionFrame)}
         </Text>
       ))}
     </Box>

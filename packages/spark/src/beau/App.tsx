@@ -1,6 +1,6 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { Box, Text, useInput, useWindowSize } from "ink";
-import { useEffect, useState, type ReactNode } from "react";
+import { Box, Text, useAnimation, useInput, useWindowSize } from "ink";
+import { useState, type ReactNode } from "react";
 
 import { BrandLogo, brandLogoHeight, brandLogoWidth } from "./brand-logo";
 import {
@@ -148,11 +148,20 @@ export function App() {
   const { columns, rows } = useWindowSize();
   const { hasBraintrustAccount, step } = useTuiState();
   const dispatch = useTuiDispatch();
-  const [brandFadeTick, setBrandFadeTick] = useState(0);
-  const [layoutTransitionTick, setLayoutTransitionTick] = useState(0);
+  const { frame: brandFadeFrame } = useAnimation({
+    interval: BRAINTRUST_FADE_TICK_MS,
+  });
+  const { frame: layoutTransitionFrame } = useAnimation({
+    interval: LAYOUT_TRANSITION_TICK_MS,
+    isActive: hasBraintrustAccount !== null,
+  });
   const isTerminalTooSmall =
     rows < MIN_TERMINAL_HEIGHT || columns < MIN_TERMINAL_WIDTH;
   const isTransitioningToSession = hasBraintrustAccount !== null;
+  const brandFadeTick = Math.min(BRAINTRUST_FADE_TICKS, brandFadeFrame);
+  const layoutTransitionTick = isTransitioningToSession
+    ? Math.min(LAYOUT_TRANSITION_TICKS, layoutTransitionFrame)
+    : 0;
   const linearTransitionProgress = isTransitioningToSession
     ? layoutTransitionTick / LAYOUT_TRANSITION_TICKS
     : 0;
@@ -229,42 +238,6 @@ export function App() {
     : Math.max(0, rows - headerTop - headerHeight);
   const brandColor = braintrustBlueAtFadeTick(brandFadeTick);
   const promptColor = braintrustPromptBlueAtFadeTick(brandFadeTick);
-
-  useEffect(() => {
-    if (brandFadeTick >= BRAINTRUST_FADE_TICKS) {
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      setBrandFadeTick((currentTick) =>
-        Math.min(BRAINTRUST_FADE_TICKS, currentTick + 1),
-      );
-    }, BRAINTRUST_FADE_TICK_MS);
-
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [brandFadeTick]);
-
-  useEffect(() => {
-    if (hasBraintrustAccount === null) {
-      return;
-    }
-
-    if (layoutTransitionTick >= LAYOUT_TRANSITION_TICKS) {
-      return;
-    }
-
-    const timeout = setTimeout(() => {
-      setLayoutTransitionTick((currentTick) =>
-        Math.min(LAYOUT_TRANSITION_TICKS, currentTick + 1),
-      );
-    }, LAYOUT_TRANSITION_TICK_MS);
-
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [hasBraintrustAccount, layoutTransitionTick]);
 
   return (
     <Box flexDirection="column" height={rows} width={columns}>

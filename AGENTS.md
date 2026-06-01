@@ -30,6 +30,7 @@ Default implementation work should go into the Clack implementation. Do not work
 - Use React Context plus reducers for global TUI state management in the beau Ink variant.
 - It is fine for reducer state to churn while the beau TUI evolves. Any beau TUI change may fully refactor the reducer state shape when the new shape makes more sense.
 - Use local React state for state that is truly local to a beau component or interaction.
+- Use Ink's canonical `useAnimation()` hook whenever beau Ink code needs animation timing; do not add ad hoc `setInterval`, `setTimeout`, `Date.now`, or `performance.now` loops for animation frames.
 - Always use React Query to communicate with the backend.
 - Keep beau Ink UI components focused on rendering and input handling.
 - Keep backend/API request logic out of presentation components; expose it through query or mutation hooks.
