@@ -191,21 +191,17 @@ vi.mock("@clack/prompts", () => ({
   },
 }));
 
-const WIZARD_INTRO = [
-  "Welcome to the Braintrust setup wizard",
-  "",
-  "Setup plan:",
-  "You'll sign in with Braintrust, choose an org and project, save an API key for local testing, set up the Braintrust CLI, then choose how to add instrumentation.",
-].join("\n");
+const WIZARD_INTRO = "Braintrust Setup Wizard";
 const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
 const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_MODE_MESSAGE =
   "How do you want to add Braintrust instrumentation?";
 const CLI_INSTALL_MESSAGE = "Install Braintrust CLI?";
-const CLI_UPDATE_MESSAGE = "Update Braintrust CLI? (bt 0.10.0 installed)";
+const CLI_UPDATE_MESSAGE = "Update Braintrust CLI to the latest version?";
 const TOOL_SELECT_MESSAGE = "Which coding agent should Braintrust Setup use?";
 const CODING_AGENT_PROCEED_MESSAGE =
-  "This setup wizard will now invoke a coding agent. Proceed?";
+  "This setup wizard will now invoke a coding agent with full permissions. Proceed?";
+const CODING_AGENT_SCAN_MESSAGE = "Scanning for available coding agents...";
 const OWN_AGENT_DELIVERY_MESSAGE =
   "How should Braintrust Setup deliver the instrumentation prompt?";
 const OWN_AGENT_COMPLETED_MESSAGE =
@@ -362,6 +358,13 @@ function buildDeps(
           );
           expect(prompt).toContain("Do not use the Braintrust CLI (`bt`).");
           expect(prompt).not.toContain("Unattended mode (YOLO)");
+          onEvent({
+            type: "reading",
+            message: "Reading package.json",
+            target: "package.json",
+            toolInput: "file_path: package.json",
+            toolName: "Read",
+          });
           onEvent({ type: "thinking", message: "Thinking..." });
           onEvent({
             type: "editing",
@@ -429,11 +432,9 @@ describe("runClackWizard", () => {
     expect(events).toContain(`select:${CLI_INSTALL_MESSAGE}`);
     expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
     expect(events).not.toContain(`select:${TOOL_SELECT_MESSAGE}`);
-    expect(events).toContain(
-      "spinner.start:Determining available coding agents...",
-    );
+    expect(events).toContain(`spinner.start:${CODING_AGENT_SCAN_MESSAGE}`);
     const codingAgentSpinnerStart = events.indexOf(
-      "spinner.start:Determining available coding agents...",
+      `spinner.start:${CODING_AGENT_SCAN_MESSAGE}`,
     );
     const instrumentationModePrompt = events.indexOf(
       `select:${INSTRUMENTATION_MODE_MESSAGE}`,
@@ -471,7 +472,9 @@ describe("runClackWizard", () => {
         ),
       ),
     ).toBe(true);
-    expect(events).toContain("spinner.start:Waiting for login in browser...");
+    expect(events).toContain(
+      "spinner.start:Waiting for you to sign in via the browser...",
+    );
     expect(
       events.some((event) =>
         event.startsWith("spinner.stop:Browser setup complete."),
@@ -485,7 +488,9 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "taskLog:Running Claude Code to instrument your application:0:false",
     );
-    expect(events).toContain("taskLog.message:edit package.json");
+    expect(events).toContain("taskLog.message:read: package.json");
+    expect(events).not.toContain("taskLog.message:thinking");
+    expect(events).toContain("taskLog.message:write: package.json");
     expect(events).toContain("taskLog.success:Instrumentation complete.");
     expect(readFileSync(join(deps.cwd, ".env.braintrust"), "utf8")).toBe(
       ENV_BRAINTRUST_FILE_CONTENT,
@@ -573,7 +578,7 @@ describe("runClackWizard", () => {
     expect(maxActiveSmokeTests).toBe(2);
     expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
     const codingAgentSpinnerStart = events.indexOf(
-      "spinner.start:Determining available coding agents...",
+      `spinner.start:${CODING_AGENT_SCAN_MESSAGE}`,
     );
     const instrumentationModePrompt = events.indexOf(
       `select:${INSTRUMENTATION_MODE_MESSAGE}`,
@@ -599,7 +604,9 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "taskLog:Running Claude Code to instrument your application:0:false",
     );
-    expect(events).toContain("taskLog.message:edit package.json");
+    expect(events).toContain("taskLog.message:read: package.json");
+    expect(events).not.toContain("taskLog.message:thinking");
+    expect(events).toContain("taskLog.message:write: package.json");
     expect(events).toContain("taskLog.success:Instrumentation complete.");
   });
 
@@ -782,9 +789,7 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "spinner.message:Configuring Braintrust CLI context...",
     );
-    expect(events).toContain(
-      "spinner.message:Determining available coding agents...",
-    );
+    expect(events).toContain(`spinner.message:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(events).toContain("spinner.clear");
     expect(events).not.toContain("spinner.stop:Installed Braintrust CLI.");
     expect(events).not.toContain("success:Configured Braintrust CLI.");
@@ -792,15 +797,13 @@ describe("runClackWizard", () => {
       "spinner.message:Configuring Braintrust CLI context...",
     );
     const codingAgentSpinnerIndex = events.indexOf(
-      "spinner.message:Determining available coding agents...",
+      `spinner.message:${CODING_AGENT_SCAN_MESSAGE}`,
     );
     expect(codingAgentSpinnerIndex).toBeGreaterThan(configureSpinnerIndex);
     expect(
       events.slice(configureSpinnerIndex, codingAgentSpinnerIndex),
     ).not.toContain("spinner.clear");
-    expect(events).not.toContain(
-      "spinner.start:Determining available coding agents...",
-    );
+    expect(events).not.toContain(`spinner.start:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(
       events.indexOf("spinner.message:Checking Braintrust CLI context..."),
     ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
@@ -912,9 +915,7 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "spinner.message:Configuring Braintrust CLI context...",
     );
-    expect(events).toContain(
-      "spinner.message:Determining available coding agents...",
-    );
+    expect(events).toContain(`spinner.message:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(events).toContain("spinner.clear");
     expect(events).not.toContain("spinner.stop:Updated Braintrust CLI.");
     expect(events).not.toContain("success:Configured Braintrust CLI.");
@@ -922,15 +923,13 @@ describe("runClackWizard", () => {
       "spinner.message:Configuring Braintrust CLI context...",
     );
     const codingAgentSpinnerIndex = events.indexOf(
-      "spinner.message:Determining available coding agents...",
+      `spinner.message:${CODING_AGENT_SCAN_MESSAGE}`,
     );
     expect(codingAgentSpinnerIndex).toBeGreaterThan(configureSpinnerIndex);
     expect(
       events.slice(configureSpinnerIndex, codingAgentSpinnerIndex),
     ).not.toContain("spinner.clear");
-    expect(events).not.toContain(
-      "spinner.start:Determining available coding agents...",
-    );
+    expect(events).not.toContain(`spinner.start:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(calls).toEqual(["update:/bin/bt", "status:/bin/bt", "login"]);
   });
 
@@ -993,7 +992,7 @@ describe("runClackWizard", () => {
     expect(events).toContain(`select:${CLI_UPDATE_MESSAGE}`);
     expect(
       events.some((event) =>
-        event.startsWith("select:Switch Braintrust CLI from"),
+        event.startsWith("select:Switch Braintrust CLI login profile from"),
       ),
     ).toBe(false);
     expect(events).toContain(
@@ -1027,7 +1026,7 @@ describe("runClackWizard", () => {
 
     expect(
       events.some((event) =>
-        event.startsWith("select:Switch Braintrust CLI from"),
+        event.startsWith("select:Switch Braintrust CLI login profile from"),
       ),
     ).toBe(false);
     expect(calls).toEqual(["login"]);
@@ -1079,7 +1078,7 @@ describe("runClackWizard", () => {
     await runClackWizard(deps);
 
     expect(events).toContain(
-      "select:Switch Braintrust CLI from work (other/old) to acme (acme/demo)?",
+      "select:Switch Braintrust CLI login profile from work (other/old) to acme (acme/demo)?",
     );
     expect(events).not.toContain(
       "info:Leaving existing Braintrust CLI context unchanged.",
@@ -1247,7 +1246,13 @@ describe("runClackWizard", () => {
     const deps = buildDeps({ cwd: join(dir, "child") });
 
     await runClackWizard(deps);
-    expect(events.some((e) => e.startsWith("warn:Heads up"))).toBe(true);
+    expect(
+      events.some((event) =>
+        event.startsWith(
+          "warn:Warning: You are running this wizard inside a folder that is not a git repository.",
+        ),
+      ),
+    ).toBe(true);
     expect(events).toContain("select:Continue without a git repository?");
   });
 
@@ -1403,9 +1408,7 @@ describe("runClackWizard", () => {
 
     await runClackWizard(deps);
 
-    expect(events).toContain(
-      "spinner.start:Determining available coding agents...",
-    );
+    expect(events).toContain(`spinner.start:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(events).toContain(
       `select.options:${INSTRUMENTATION_MODE_MESSAGE}:Use own coding agent|Set up manually`,
     );

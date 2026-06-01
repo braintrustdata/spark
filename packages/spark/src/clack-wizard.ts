@@ -394,12 +394,8 @@ async function handleBraintrustCliSetup(
   let commandPath = discovery.commandPath;
 
   if (discovery.installed) {
-    const installedLabel =
-      discovery.version ??
-      commandPath ??
-      COPY.braintrustCli.installedVersionUnknown;
     const shouldUpdate = await selectBoolean({
-      message: COPY.braintrustCli.updateQuestion(installedLabel),
+      message: COPY.braintrustCli.updateQuestion,
       choices: COPY.braintrustCli.updateChoices,
       yesFirst: true,
     });
