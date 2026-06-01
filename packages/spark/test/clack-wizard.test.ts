@@ -9,7 +9,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   type WizardSessionCompleteResult,
@@ -24,13 +24,179 @@ import {
 } from "../src/braintrust-cli";
 import {
   type CodingToolRuntime,
-  type ClackWizardPrompts,
   runClackWizard,
   WizardCancelledError,
   type WizardDeps,
 } from "../src/clack-wizard";
 
-const WIZARD_INTRO_TITLE = "Welcome to the Braintrust setup wizard";
+const clackMock = vi.hoisted(() => ({
+  cancelSymbol: Symbol("cancel"),
+  events: [] as string[],
+  selects: [] as unknown[],
+  texts: [] as unknown[],
+  passwords: [] as unknown[],
+}));
+
+vi.mock("@clack/prompts", () => ({
+  cancel(message: string) {
+    clackMock.events.push(`cancel:${message}`);
+  },
+  intro(message: string) {
+    clackMock.events.push(`intro:${message}`);
+  },
+  isCancel(value: unknown): value is symbol {
+    return value === clackMock.cancelSymbol;
+  },
+  note(message: string, title?: string) {
+    clackMock.events.push(`note:${title ?? ""}`);
+    clackMock.events.push(`note.message:${message}`);
+  },
+  outro(message: string) {
+    clackMock.events.push(`outro:${message.split("\n")[0]}`);
+  },
+  password(options: { readonly message: string }) {
+    const next = clackMock.passwords.shift();
+    clackMock.events.push(`password:${options.message}`);
+    if (next === undefined) {
+      throw new Error(`No password answer for: ${options.message}`);
+    }
+    return Promise.resolve(next);
+  },
+  select<T>(options: {
+    readonly message: string;
+    readonly options: ReadonlyArray<{
+      readonly label?: string | undefined;
+      readonly value: T;
+      readonly hint?: string | undefined;
+    }>;
+  }) {
+    const next = clackMock.selects.shift();
+    clackMock.events.push(`select:${options.message}`);
+    clackMock.events.push(
+      `select.options:${options.message}:${options.options.map((option) => option.label).join("|")}`,
+    );
+    if (next === undefined) {
+      throw new Error(`No select answer for: ${options.message}`);
+    }
+    if (next === "first") {
+      return Promise.resolve(options.options[0]!.value);
+    }
+    if (next === "yes" || next === "no") {
+      const value = next === "yes";
+      const option = options.options.find((option) => option.value === value);
+      if (!option) {
+        throw new Error(`No select option for: ${next}`);
+      }
+      return Promise.resolve(option.value);
+    }
+    if (next === "built-in") {
+      return Promise.resolve(
+        options.options.find(
+          (option) => option.label === "Use built-in coding agent",
+        )!.value,
+      );
+    }
+    if (next === "own-agent") {
+      return Promise.resolve(
+        options.options.find(
+          (option) => option.label === "Use own coding agent",
+        )!.value,
+      );
+    }
+    if (next === "manual") {
+      return Promise.resolve(
+        options.options.find((option) => option.label === "Set up manually")!
+          .value,
+      );
+    }
+    if (
+      next === "clipboard" ||
+      next === "terminal" ||
+      next === "proceed" ||
+      next === "abort" ||
+      next === "confirm" ||
+      next === "understood"
+    ) {
+      const option = options.options.find((option) => option.value === next);
+      if (!option) {
+        throw new Error(`No select option for: ${next}`);
+      }
+      return Promise.resolve(option.value);
+    }
+    return Promise.resolve(next);
+  },
+  text(options: { readonly message: string }) {
+    const next = clackMock.texts.shift();
+    clackMock.events.push(`text:${options.message}`);
+    if (next === undefined) {
+      throw new Error(`No text answer for: ${options.message}`);
+    }
+    return Promise.resolve(next);
+  },
+  spinner(options?: {
+    readonly indicator?: string;
+    readonly withGuide?: boolean;
+  }) {
+    clackMock.events.push(
+      `spinner.create:${options?.indicator ?? "dots"}:${String(options?.withGuide)}`,
+    );
+    return {
+      start(message?: string) {
+        clackMock.events.push(`spinner.start:${message ?? ""}`);
+      },
+      stop(message?: string) {
+        clackMock.events.push(`spinner.stop:${message ?? ""}`);
+      },
+      cancel(message?: string) {
+        clackMock.events.push(`spinner.cancel:${message ?? ""}`);
+      },
+      error(message?: string) {
+        clackMock.events.push(`spinner.error:${message ?? ""}`);
+      },
+      message(message?: string) {
+        clackMock.events.push(`spinner.message:${message ?? ""}`);
+      },
+      clear() {
+        clackMock.events.push("spinner.clear");
+      },
+      isCancelled: false,
+    };
+  },
+  taskLog(options: {
+    readonly title: string;
+    readonly spacing?: number;
+    readonly retainLog?: boolean;
+  }) {
+    clackMock.events.push(
+      `taskLog:${options.title}:${String(options.spacing)}:${String(options.retainLog)}`,
+    );
+    return {
+      message(message: string) {
+        clackMock.events.push(`taskLog.message:${message}`);
+      },
+      error(message: string) {
+        clackMock.events.push(`taskLog.error:${message}`);
+      },
+      success(message: string) {
+        clackMock.events.push(`taskLog.success:${message}`);
+      },
+    };
+  },
+  log: {
+    warn: (message: string) => clackMock.events.push(`warn:${message}`),
+    info: (message: string) => clackMock.events.push(`info:${message}`),
+    error: (message: string) => clackMock.events.push(`error:${message}`),
+    success: (message: string) => clackMock.events.push(`success:${message}`),
+    message: (message: string) => clackMock.events.push(`message:${message}`),
+  },
+}));
+
+const WIZARD_INTRO = [
+  "Welcome to the Braintrust setup wizard",
+  "",
+  "Setup plan:",
+  "You'll sign in with Braintrust, choose an org and project, save an API key for local testing, set up the Braintrust CLI, then choose how to add instrumentation.",
+].join("\n");
 const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
 const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_MODE_MESSAGE =
@@ -38,8 +204,12 @@ const INSTRUMENTATION_MODE_MESSAGE =
 const CLI_INSTALL_MESSAGE = "Install Braintrust CLI?";
 const CLI_UPDATE_MESSAGE = "Update Braintrust CLI? (bt 0.10.0 installed)";
 const TOOL_SELECT_MESSAGE = "Which coding agent should Braintrust Setup use?";
+const CODING_AGENT_PROCEED_MESSAGE =
+  "This setup wizard will now invoke a coding agent. Proceed?";
 const OWN_AGENT_DELIVERY_MESSAGE =
   "How should Braintrust Setup deliver the instrumentation prompt?";
+const OWN_AGENT_COMPLETED_MESSAGE =
+  "Give the above prompt to your coding agent and proceed when the agent has completed the task.";
 const ENV_BRAINTRUST_NOTICE =
   "The wizard will now create .env.braintrust and .braintrust.json files that are used to authenticate your application to Braintrust. They will be used for local testing.";
 const ENV_BRAINTRUST_REPLACE_QUESTION = "Replace local Braintrust token files?";
@@ -57,7 +227,8 @@ const BRAINTRUST_JSON_FILE_CONTENT = `${JSON.stringify(
 const LOCAL_TOKEN_GITIGNORE_CONTENT =
   "# Added by Braintrust Wizard\n.env.braintrust\n.braintrust.json\n";
 
-const CANCEL = Symbol("cancel");
+const CANCEL = clackMock.cancelSymbol;
+const stdoutWriteSpy = vi.spyOn(process.stdout, "write");
 
 type SelectAnswer =
   | "first"
@@ -68,8 +239,10 @@ type SelectAnswer =
   | "manual"
   | "clipboard"
   | "terminal"
-  | "production-done"
-  | "production-later"
+  | "proceed"
+  | "abort"
+  | "confirm"
+  | "understood"
   | typeof CANCEL;
 type TextAnswer = string | typeof CANCEL;
 
@@ -81,143 +254,29 @@ type FakePromptInputs = {
 
 function createPrompts(inputs: FakePromptInputs) {
   const events: string[] = [];
-  const selects = [...(inputs.selects ?? [])];
-  const texts = [...(inputs.texts ?? [])];
-  const passwords = [...(inputs.passwords ?? [])];
+  clackMock.events = events;
+  clackMock.selects = [...(inputs.selects ?? [])];
+  clackMock.texts = [...(inputs.texts ?? [])];
+  clackMock.passwords = [...(inputs.passwords ?? [])];
+  stdoutWriteSpy.mockImplementation(
+    (
+      chunk: string | Uint8Array,
+      encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+      callback?: (error?: Error | null) => void,
+    ) => {
+      const message =
+        typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8");
+      events.push(`writeRaw:${message}`);
+      const done =
+        typeof encodingOrCallback === "function"
+          ? encodingOrCallback
+          : callback;
+      done?.();
+      return true;
+    },
+  );
 
-  const prompts: ClackWizardPrompts = {
-    cancel(message) {
-      events.push(`cancel:${message}`);
-    },
-    intro(message) {
-      events.push(`intro:${message}`);
-    },
-    isCancel(value): value is symbol {
-      return value === CANCEL;
-    },
-    note(message, title) {
-      events.push(`note:${title ?? ""}`);
-      events.push(`note.message:${message}`);
-    },
-    outro(message) {
-      events.push(`outro:${message.split("\n")[0]}`);
-    },
-    password(options) {
-      const next = passwords.shift();
-      events.push(`password:${options.message}`);
-      if (next === undefined) {
-        throw new Error(`No password answer for: ${options.message}`);
-      }
-      return Promise.resolve(next);
-    },
-    select<T>(options: {
-      readonly message: string;
-      readonly options: ReadonlyArray<{
-        readonly label: string;
-        readonly value: T;
-        readonly hint?: string | undefined;
-      }>;
-    }) {
-      const next = selects.shift();
-      events.push(`select:${options.message}`);
-      if (next === undefined) {
-        throw new Error(`No select answer for: ${options.message}`);
-      }
-      if (next === "first") {
-        return Promise.resolve(options.options[0]!.value);
-      }
-      if (next === "yes" || next === "no") {
-        const value = next === "yes";
-        const option = options.options.find((option) => option.value === value);
-        if (!option) {
-          throw new Error(`No select option for: ${next}`);
-        }
-        return Promise.resolve(option.value);
-      }
-      if (next === "built-in") {
-        return Promise.resolve(
-          options.options.find(
-            (option) => option.label === "Use built-in coding agent",
-          )!.value,
-        );
-      }
-      if (next === "own-agent") {
-        return Promise.resolve(
-          options.options.find(
-            (option) => option.label === "Use own coding agent",
-          )!.value,
-        );
-      }
-      if (next === "manual") {
-        return Promise.resolve(
-          options.options.find((option) => option.label === "Set up manually")!
-            .value,
-        );
-      }
-      if (
-        next === "clipboard" ||
-        next === "terminal" ||
-        next === "production-done" ||
-        next === "production-later"
-      ) {
-        const value =
-          next === "production-done"
-            ? "done"
-            : next === "production-later"
-              ? "later"
-              : next;
-        const option = options.options.find((option) => option.value === value);
-        if (!option) {
-          throw new Error(`No select option for: ${next}`);
-        }
-        return Promise.resolve(option.value);
-      }
-      return Promise.resolve(next);
-    },
-    text(options) {
-      const next = texts.shift();
-      events.push(`text:${options.message}`);
-      if (next === undefined) {
-        throw new Error(`No text answer for: ${options.message}`);
-      }
-      return Promise.resolve(next);
-    },
-    spinner() {
-      return {
-        start(message) {
-          events.push(`spinner.start:${message ?? ""}`);
-        },
-        stop(message) {
-          events.push(`spinner.stop:${message ?? ""}`);
-        },
-      };
-    },
-    codingAgentOutput(options) {
-      events.push(`agent:${options.toolLabel}`);
-      events.push(`agent.title:${options.title}`);
-      return {
-        message(message) {
-          events.push(`agent.message:${message}`);
-        },
-        fail(message) {
-          events.push(`agent.error:${message}`);
-        },
-        success(message) {
-          events.push(`agent.success:${message}`);
-        },
-      };
-    },
-    log: {
-      warn: (m) => events.push(`warn:${m}`),
-      info: (m) => events.push(`info:${m}`),
-      error: (m) => events.push(`error:${m}`),
-      success: (m) => events.push(`success:${m}`),
-      message: (m) => events.push(`message:${m}`),
-    },
-    writeRaw: (m) => events.push(`writeRaw:${m}`),
-  };
-
-  return { prompts, events };
+  return { events };
 }
 
 const DEFAULT_LOGIN_RESULT: WizardSessionCompleteResult = {
@@ -228,14 +287,15 @@ const DEFAULT_LOGIN_RESULT: WizardSessionCompleteResult = {
   projectName: "demo",
 };
 
-function buildDeps(args: {
-  readonly prompts: ClackWizardPrompts;
-  readonly loginWithWizardSession?: WizardSessionLogin;
-  readonly cwd?: string;
-  readonly codingTools?: CodingToolRuntime;
-  readonly braintrustCli?: BraintrustCliRuntime;
-  readonly writeClipboard?: (text: string) => Promise<void>;
-}): WizardDeps {
+function buildDeps(
+  args: {
+    readonly loginWithWizardSession?: WizardSessionLogin;
+    readonly cwd?: string;
+    readonly codingTools?: CodingToolRuntime;
+    readonly braintrustCli?: BraintrustCliRuntime;
+    readonly writeClipboard?: (text: string) => Promise<void>;
+  } = {},
+): WizardDeps {
   const cwd = args.cwd ?? createGitTempDir();
   const stubLogin =
     args.loginWithWizardSession ??
@@ -263,7 +323,6 @@ function buildDeps(args: {
       projId: undefined,
       yolo: false,
     },
-    prompts: args.prompts,
     loginWithWizardSession: stubLogin,
     openBrowser: () => Promise.resolve(true),
     writeClipboard: args.writeClipboard ?? (() => Promise.resolve()),
@@ -353,25 +412,56 @@ function createBraintrustCliStub(
 
 describe("runClackWizard", () => {
   it("walks through the happy path with one usable coding tool", async () => {
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "first", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "first", "proceed", "understood"],
     });
-    const deps = buildDeps({ prompts });
+    const deps = buildDeps();
 
     const result = await runClackWizard(deps);
 
     expect(result.orgName).toBe("acme");
     expect(result.projectName).toBe("demo");
     expect(result.braintrustApiKey).toBe("bt-secret-key");
-    expect(events[0]).toBe(`intro:${WIZARD_INTRO_TITLE}`);
-    expect(events).toContain("note:Setup plan");
+    expect(events[0]).toBe("writeRaw:\n");
+    expect(events[1]).toBe(`intro:${WIZARD_INTRO}`);
+    expect(events).not.toContain("note:Setup plan");
     expect(events).toContain(`select:${ACCOUNT_QUESTION}`);
     expect(events).toContain(`select:${CLI_INSTALL_MESSAGE}`);
     expect(events).toContain(`select:${INSTRUMENTATION_MODE_MESSAGE}`);
     expect(events).not.toContain(`select:${TOOL_SELECT_MESSAGE}`);
+    expect(events).toContain("spinner.create:dots:false");
+    expect(events).toContain(
+      "spinner.start:Determining available coding agents...",
+    );
+    expect(events).toContain("spinner.clear");
+    expect(
+      events.indexOf("spinner.start:Determining available coding agents..."),
+    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
+    expect(
+      events.findIndex(
+        (event, index) =>
+          index >
+            events.indexOf(
+              "spinner.start:Determining available coding agents...",
+            ) && event === "spinner.clear",
+      ),
+    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
+    expect(events).toContain(`select:${CODING_AGENT_PROCEED_MESSAGE}`);
+    expect(events).toContain("spinner.create:timer:false");
+    expect(events).not.toContain(
+      "spinner.start:Checking Claude Code can run...",
+    );
     expect(events.some((event) => event.startsWith("info:Sign in:"))).toBe(
       true,
     );
+    expect(
+      events.some(
+        (event) =>
+          event.includes(
+            "Sign in: https://app.test/app/cli-login?session_token=test",
+          ) && !event.includes("\u001B]8;;"),
+      ),
+    ).toBe(true);
     expect(
       events.some((event) =>
         event.includes(
@@ -390,19 +480,35 @@ describe("runClackWizard", () => {
         event.startsWith("success:Browser setup complete"),
       ),
     ).toBe(false);
-    expect(events).toContain("agent:Claude Code");
     expect(events).toContain(
-      "agent.title:Running Claude Code to instrument your application",
+      "taskLog:Running Claude Code to instrument your application:0:false",
     );
-    expect(events).toContain("agent.message:edit package.json");
-    expect(events).toContain("agent.success:Instrumentation complete.");
+    expect(events).toContain("spinner.start:Running Claude Code...");
+    expect(
+      events.findIndex(
+        (event, index) =>
+          index > events.indexOf("spinner.start:Running Claude Code...") &&
+          event === "spinner.clear",
+      ),
+    ).toBeLessThan(
+      events.indexOf(
+        "taskLog:Running Claude Code to instrument your application:0:false",
+      ),
+    );
+    expect(events).toContain("taskLog.message:edit package.json");
+    expect(events).toContain("taskLog.success:Instrumentation complete.");
     expect(readFileSync(join(deps.cwd, ".env.braintrust"), "utf8")).toBe(
       ENV_BRAINTRUST_FILE_CONTENT,
     );
     expect(readFileSync(join(deps.cwd, ".braintrust.json"), "utf8")).toBe(
       BRAINTRUST_JSON_FILE_CONTENT,
     );
-    expectEnvNoticeBeforeWrite(events);
+    expect(events).not.toContain(
+      "success:Wrote .env.braintrust and .braintrust.json",
+    );
+    expect(events).toContain(
+      "note.message:The local Braintrust token files contain a BRAINTRUST_API_KEY token. Add that token to your deployment platform's environment variables so tracing works in production.\n\nEnv file: .env.braintrust",
+    );
     expect(
       events.indexOf(`note.message:${ENV_BRAINTRUST_NOTICE}`),
     ).toBeLessThan(events.indexOf(`select:${CLI_INSTALL_MESSAGE}`));
@@ -416,6 +522,95 @@ describe("runClackWizard", () => {
     );
   });
 
+  it("preflights available coding agents before asking for instrumentation mode", async () => {
+    const calls: string[] = [];
+    let activeSmokeTests = 0;
+    let maxActiveSmokeTests = 0;
+    const { events } = createPrompts({
+      selects: ["yes", "no", "built-in", "first", "proceed", "understood"],
+    });
+    const deps = buildDeps({
+      codingTools: {
+        discover: () => {
+          calls.push("discover");
+          return Promise.resolve([
+            {
+              id: "claude",
+              label: "Claude Code",
+              command: "claude",
+              installed: true,
+              usable: true,
+            },
+            {
+              id: "codex",
+              label: "Codex",
+              command: "codex",
+              installed: true,
+              usable: true,
+            },
+          ]);
+        },
+        smokeTest: async ({ id }) => {
+          calls.push(`smoke:${id}`);
+          activeSmokeTests += 1;
+          maxActiveSmokeTests = Math.max(maxActiveSmokeTests, activeSmokeTests);
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          activeSmokeTests -= 1;
+          return {
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          };
+        },
+        run: ({ onEvent }) => {
+          onEvent({ type: "completed", message: "Done" });
+          return Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "INSTRUMENTATION_COMPLETE",
+          });
+        },
+      },
+    });
+
+    await runClackWizard(deps);
+
+    expect(calls.slice(0, 3)).toEqual([
+      "discover",
+      "smoke:claude",
+      "smoke:codex",
+    ]);
+    expect(maxActiveSmokeTests).toBe(2);
+    expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
+    expect(
+      events.indexOf("spinner.start:Determining available coding agents..."),
+    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
+    expect(
+      events.findIndex(
+        (event, index) =>
+          index >
+            events.indexOf(
+              "spinner.start:Determining available coding agents...",
+            ) && event === "spinner.clear",
+      ),
+    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
+  });
+
+  it("uses compact task log spacing for built-in coding agent output", async () => {
+    const { events } = createPrompts({
+      selects: ["yes", "no", "first", "proceed", "understood"],
+    });
+    const deps = buildDeps();
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(
+      "taskLog:Running Claude Code to instrument your application:0:false",
+    );
+    expect(events).toContain("taskLog.message:edit package.json");
+    expect(events).toContain("taskLog.success:Instrumentation complete.");
+  });
+
   it("passes browser auth mode based on the account answer", async () => {
     const cases = [
       { answer: true, expectedAuthMode: "signin" },
@@ -424,17 +619,16 @@ describe("runClackWizard", () => {
 
     for (const { answer, expectedAuthMode } of cases) {
       let authMode: string | undefined;
-      const { prompts } = createPrompts({
+      createPrompts({
         selects: [
           answer ? "yes" : "no",
           "no",
           "manual",
-          "yes",
-          "production-done",
+          "confirm",
+          "understood",
         ],
       });
       const deps = buildDeps({
-        prompts,
         loginWithWizardSession: async ({ events, loginUrlParams }) => {
           authMode = loginUrlParams?.authMode;
           events.onLoginUrl({
@@ -458,10 +652,10 @@ describe("runClackWizard", () => {
     const cwd = createGitTempDir();
     const envFilePath = join(cwd, ".env.braintrust");
     writeFileSync(envFilePath, "BRAINTRUST_API_KEY=old\n");
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "yes", "no", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "yes", "no", "manual", "confirm", "understood"],
     });
-    const deps = buildDeps({ prompts, cwd });
+    const deps = buildDeps({ cwd });
 
     await runClackWizard(deps);
 
@@ -476,10 +670,10 @@ describe("runClackWizard", () => {
     const root = createGitTempDir();
     const cwd = join(root, "app", "service");
     mkdirSync(cwd, { recursive: true });
-    const { prompts } = createPrompts({
-      selects: ["yes", "no", "manual", "yes", "production-done"],
+    createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
     });
-    const deps = buildDeps({ prompts, cwd });
+    const deps = buildDeps({ cwd });
 
     await runClackWizard(deps);
 
@@ -501,10 +695,10 @@ describe("runClackWizard", () => {
     const cwd = createGitTempDir();
     const envFilePath = join(cwd, ".env.braintrust");
     writeFileSync(envFilePath, "BRAINTRUST_API_KEY=old\n");
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "no", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "no", "manual", "confirm", "understood"],
     });
-    const deps = buildDeps({ prompts, cwd });
+    const deps = buildDeps({ cwd });
 
     await runClackWizard(deps);
 
@@ -522,13 +716,30 @@ describe("runClackWizard", () => {
     );
   });
 
+  it("does not print a gitignore message when local token files are already covered", async () => {
+    const cwd = createGitTempDir();
+    writeFileSync(
+      join(cwd, ".gitignore"),
+      ".env.braintrust\n.braintrust.json\n",
+    );
+    const { events } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
+    });
+    const deps = buildDeps({ cwd });
+
+    await runClackWizard(deps);
+
+    expect(events).not.toContain(
+      "info:.gitignore already covers local Braintrust token files.",
+    );
+  });
+
   it("installs and configures the Braintrust CLI when missing and accepted", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "yes", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "yes", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         discoveries: [
           { installed: false },
@@ -559,8 +770,21 @@ describe("runClackWizard", () => {
 
     expect(events).toContain(`select:${CLI_INSTALL_MESSAGE}`);
     expect(events).toContain("spinner.start:Installing Braintrust CLI...");
-    expect(events).toContain("spinner.stop:Installed Braintrust CLI.");
-    expect(events).toContain("success:Configured Braintrust CLI.");
+    expect(events).toContain(
+      "spinner.message:Checking Braintrust CLI context...",
+    );
+    expect(events).toContain(
+      "spinner.message:Configuring Braintrust CLI context...",
+    );
+    expect(events).toContain("spinner.clear");
+    expect(events).not.toContain("spinner.stop:Installed Braintrust CLI.");
+    expect(events).not.toContain("success:Configured Braintrust CLI.");
+    expect(
+      events.indexOf("spinner.message:Checking Braintrust CLI context..."),
+    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
+    expect(
+      events.indexOf("spinner.message:Configuring Braintrust CLI context..."),
+    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
     expect(calls).toEqual([
       "install",
       "status:/usr/local/bin/bt",
@@ -570,11 +794,10 @@ describe("runClackWizard", () => {
 
   it("skips Braintrust CLI install and configuration when declined", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         install: () => {
           calls.push("install");
@@ -596,11 +819,10 @@ describe("runClackWizard", () => {
 
   it("continues when Braintrust CLI install fails", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "yes", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "yes", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         install: () => Promise.reject(new Error("install failed")),
         status: () => {
@@ -617,7 +839,10 @@ describe("runClackWizard", () => {
     await runClackWizard(deps);
 
     expect(events).toContain("spinner.start:Installing Braintrust CLI...");
-    expect(events).toContain("spinner.stop:Braintrust CLI install stopped.");
+    expect(events).toContain("spinner.clear");
+    expect(events).not.toContain(
+      "spinner.stop:Braintrust CLI install stopped.",
+    );
     expect(
       events.some((event) =>
         event.startsWith(
@@ -631,11 +856,10 @@ describe("runClackWizard", () => {
 
   it("updates and configures an installed Braintrust CLI when accepted", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "yes", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "yes", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         discoveries: [
           { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
@@ -660,18 +884,24 @@ describe("runClackWizard", () => {
 
     expect(events).toContain(`select:${CLI_UPDATE_MESSAGE}`);
     expect(events).toContain("spinner.start:Updating Braintrust CLI...");
-    expect(events).toContain("spinner.stop:Updated Braintrust CLI.");
-    expect(events).toContain("success:Configured Braintrust CLI.");
+    expect(events).toContain(
+      "spinner.message:Checking Braintrust CLI context...",
+    );
+    expect(events).toContain(
+      "spinner.message:Configuring Braintrust CLI context...",
+    );
+    expect(events).toContain("spinner.clear");
+    expect(events).not.toContain("spinner.stop:Updated Braintrust CLI.");
+    expect(events).not.toContain("success:Configured Braintrust CLI.");
     expect(calls).toEqual(["update:/bin/bt", "status:/bin/bt", "login"]);
   });
 
   it("still configures an installed Braintrust CLI when update fails", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "yes", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "yes", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         discoveries: [
           { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
@@ -691,7 +921,8 @@ describe("runClackWizard", () => {
     await runClackWizard(deps);
 
     expect(events).toContain("spinner.start:Updating Braintrust CLI...");
-    expect(events).toContain("spinner.stop:Braintrust CLI update stopped.");
+    expect(events).toContain("spinner.clear");
+    expect(events).not.toContain("spinner.stop:Braintrust CLI update stopped.");
     expect(
       events.some((event) =>
         event.startsWith("warn:Could not update Braintrust CLI: update failed"),
@@ -702,11 +933,10 @@ describe("runClackWizard", () => {
 
   it("configures an installed Braintrust CLI with matching context without asking to switch", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         discoveries: [
           { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
@@ -728,16 +958,73 @@ describe("runClackWizard", () => {
         event.startsWith("select:Switch Braintrust CLI from"),
       ),
     ).toBe(false);
+    expect(events).toContain(
+      "spinner.start:Checking Braintrust CLI context...",
+    );
+    expect(events).toContain(
+      "spinner.message:Configuring Braintrust CLI context...",
+    );
+    expect(calls).toEqual(["login"]);
+  });
+
+  it("does not ask to switch Braintrust CLI context when the current CLI status is incomplete", async () => {
+    const calls: string[] = [];
+    const { events } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
+    });
+    const deps = buildDeps({
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        status: () => Promise.resolve({ org: "other", project: "old" }),
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
+    expect(
+      events.some((event) =>
+        event.startsWith("select:Switch Braintrust CLI from"),
+      ),
+    ).toBe(false);
+    expect(calls).toEqual(["login"]);
+  });
+
+  it("defaults to switching a different active Braintrust CLI context", async () => {
+    const calls: string[] = [];
+    createPrompts({
+      selects: ["yes", "no", "first", "manual", "confirm", "understood"],
+    });
+    const deps = buildDeps({
+      braintrustCli: createBraintrustCliStub({
+        discoveries: [
+          { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
+        ],
+        status: () =>
+          Promise.resolve({ profile: "work", org: "other", project: "old" }),
+        loginAndSwitch: () => {
+          calls.push("login");
+          return Promise.resolve();
+        },
+      }),
+    });
+
+    await runClackWizard(deps);
+
     expect(calls).toEqual(["login"]);
   });
 
   it("leaves a different Braintrust CLI context untouched when switch is declined", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "no", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "no", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         discoveries: [
           { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
@@ -756,7 +1043,7 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "select:Switch Braintrust CLI from work (other/old) to acme (acme/demo)?",
     );
-    expect(events).toContain(
+    expect(events).not.toContain(
       "info:Leaving existing Braintrust CLI context unchanged.",
     );
     expect(calls).toEqual([]);
@@ -764,11 +1051,10 @@ describe("runClackWizard", () => {
 
   it("switches a different Braintrust CLI context when accepted", async () => {
     const calls: string[] = [];
-    const { prompts } = createPrompts({
-      selects: ["yes", "no", "yes", "manual", "yes", "production-done"],
+    createPrompts({
+      selects: ["yes", "no", "yes", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         discoveries: [
           { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
@@ -789,11 +1075,10 @@ describe("runClackWizard", () => {
 
   it("does not configure the Braintrust CLI when status inspection fails", async () => {
     const calls: string[] = [];
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "manual", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       braintrustCli: createBraintrustCliStub({
         discoveries: [
           { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
@@ -819,11 +1104,11 @@ describe("runClackWizard", () => {
   });
 
   it("cancels cleanly when the user aborts the tool select", async () => {
-    const { prompts, events } = createPrompts({
+    const smokeCalls: string[] = [];
+    const { events } = createPrompts({
       selects: ["yes", "no", "first", CANCEL],
     });
     const deps = buildDeps({
-      prompts,
       codingTools: {
         discover: () =>
           Promise.resolve([
@@ -842,22 +1127,86 @@ describe("runClackWizard", () => {
               usable: true,
             },
           ]),
-        smokeTest: () => Promise.reject(new Error("should not smoke test")),
+        smokeTest: ({ id }) => {
+          smokeCalls.push(id);
+          return Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          });
+        },
         run: () => Promise.reject(new Error("should not run")),
       },
     });
 
     await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
     expect(events).toContain(`cancel:${WIZARD_CANCEL_MESSAGE}`);
+    expect(smokeCalls).toEqual(["claude", "codex"]);
+  });
+
+  it("offers own-agent and manual setup when built-in coding agent execution is aborted", async () => {
+    const calls: string[] = [];
+    const { events } = createPrompts({
+      selects: [
+        "yes",
+        "no",
+        "built-in",
+        "abort",
+        "own-agent",
+        "terminal",
+        "confirm",
+        "understood",
+      ],
+    });
+    const deps = buildDeps({
+      codingTools: {
+        discover: () =>
+          Promise.resolve([
+            {
+              id: "claude",
+              label: "Claude Code",
+              command: "claude",
+              installed: true,
+              usable: true,
+            },
+          ]),
+        smokeTest: () => {
+          calls.push("smoke");
+          return Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          });
+        },
+        run: () => {
+          calls.push("run");
+          return Promise.reject(new Error("should not run"));
+        },
+      },
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).toContain(`select:${CODING_AGENT_PROCEED_MESSAGE}`);
+    expect(
+      events.filter(
+        (event) => event === `select:${INSTRUMENTATION_MODE_MESSAGE}`,
+      ),
+    ).toHaveLength(2);
+    expect(events).toContain(`select:${OWN_AGENT_DELIVERY_MESSAGE}`);
+    expect(events).not.toContain(
+      "taskLog:Running Claude Code to instrument your application:0:false",
+    );
+    expect(calls).toEqual(["smoke"]);
   });
 
   it("warns when not in a git repo", async () => {
     const dir = mkdtempSync(join(tmpdir(), "braintrust-setup-nogit-"));
     mkdirSync(join(dir, "child"), { recursive: true });
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "yes", "no", "first", "first", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "yes", "no", "first", "first", "understood"],
     });
-    const deps = buildDeps({ prompts, cwd: join(dir, "child") });
+    const deps = buildDeps({ cwd: join(dir, "child") });
 
     await runClackWizard(deps);
     expect(events.some((e) => e.startsWith("warn:Heads up"))).toBe(true);
@@ -866,8 +1215,8 @@ describe("runClackWizard", () => {
 
   it("cancels when the user does not continue outside a git repo", async () => {
     const dir = mkdtempSync(join(tmpdir(), "braintrust-setup-nogit-"));
-    const { prompts, events } = createPrompts({ selects: ["no"] });
-    const deps = buildDeps({ prompts, cwd: dir });
+    const { events } = createPrompts({ selects: ["no"] });
+    const deps = buildDeps({ cwd: dir });
 
     await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
     expect(events).toContain("select:Continue without a git repository?");
@@ -875,10 +1224,10 @@ describe("runClackWizard", () => {
   });
 
   it("supports manual instrumentation after creating local token files", async () => {
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "manual", "yes", "production-later"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
     });
-    const deps = buildDeps({ prompts });
+    const deps = buildDeps();
 
     await runClackWizard(deps);
     expect(events).toContain("note:Manual instrumentation");
@@ -892,7 +1241,7 @@ describe("runClackWizard", () => {
       ),
     ).toBe(true);
     expect(events).toContain("select:Braintrust instrumentation completed?");
-    expect(events).toContain(
+    expect(events).not.toContain(
       "warn:Do not forget to add BRAINTRUST_API_KEY to production. Braintrust tracing will not work in production without it.",
     );
     expect(events).toContain(`note.message:${ENV_BRAINTRUST_NOTICE}`);
@@ -907,18 +1256,10 @@ describe("runClackWizard", () => {
 
   it("copies an interactive prompt for the user's own coding agent", async () => {
     let clipboardText = "";
-    const { prompts, events } = createPrompts({
-      selects: [
-        "yes",
-        "no",
-        "own-agent",
-        "clipboard",
-        "yes",
-        "production-done",
-      ],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "own-agent", "clipboard", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       writeClipboard: (text) => {
         clipboardText = text;
         return Promise.resolve();
@@ -931,10 +1272,13 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "success:Copied instrumentation prompt to clipboard.",
     );
+    expect(events).toContain(`select:${OWN_AGENT_COMPLETED_MESSAGE}`);
     expect(events).toContain(
-      "select:Coding agent completed Braintrust instrumentation?",
+      `select.options:${OWN_AGENT_COMPLETED_MESSAGE}:Confirm and proceed`,
     );
-    expect(events).not.toContain("agent:Claude Code");
+    expect(events).not.toContain(
+      "taskLog:Running Claude Code to instrument your application:0:false",
+    );
     expect(clipboardText).toContain(
       "Look at the current workspace and instrument it with Braintrust tracing using the right Braintrust SDK(s).",
     );
@@ -945,21 +1289,20 @@ describe("runClackWizard", () => {
     expect(clipboardText).toContain(".braintrust.json");
     expect(clipboardText).toContain("Do not use the Braintrust CLI (`bt`).");
     expect(clipboardText).not.toContain("Interactive mode");
-    expectEnvNoticeBeforeWrite(events);
   });
 
   it("prints an interactive prompt for the user's own coding agent", async () => {
-    const { prompts, events } = createPrompts({
-      selects: ["yes", "no", "own-agent", "terminal", "yes", "production-done"],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "own-agent", "terminal", "confirm", "understood"],
     });
-    const deps = buildDeps({ prompts });
+    const deps = buildDeps();
 
     await runClackWizard(deps);
     expect(
       events.some(
         (event) =>
           event.startsWith("writeRaw:") &&
-          event.includes("Braintrust instrumentation prompt:") &&
+          !event.includes("Braintrust instrumentation prompt:") &&
           event.includes(
             "https://www.braintrust.dev/docs/tracing-quickstart",
           ) &&
@@ -968,22 +1311,13 @@ describe("runClackWizard", () => {
           ),
       ),
     ).toBe(true);
-    expectEnvNoticeBeforeWrite(events);
   });
 
   it("prints the own-agent prompt when clipboard copy fails", async () => {
-    const { prompts, events } = createPrompts({
-      selects: [
-        "yes",
-        "no",
-        "own-agent",
-        "clipboard",
-        "yes",
-        "production-done",
-      ],
+    const { events } = createPrompts({
+      selects: ["yes", "no", "own-agent", "clipboard", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       writeClipboard: () => Promise.reject(new Error("clipboard unavailable")),
     });
 
@@ -999,17 +1333,17 @@ describe("runClackWizard", () => {
       events.some(
         (event) =>
           event.startsWith("writeRaw:") &&
-          event.includes("Braintrust instrumentation prompt:"),
+          !event.includes("Braintrust instrumentation prompt:") &&
+          event.includes("https://www.braintrust.dev/docs/tracing-quickstart"),
       ),
     ).toBe(true);
   });
 
-  it("fails clearly when the selected tool smoke test fails", async () => {
-    const { prompts } = createPrompts({
-      selects: ["yes", "no", "first", "first"],
+  it("omits built-in setup when preflight smoke tests fail", async () => {
+    const { events } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "understood"],
     });
     const deps = buildDeps({
-      prompts,
       codingTools: {
         discover: () =>
           Promise.resolve([
@@ -1029,9 +1363,22 @@ describe("runClackWizard", () => {
       },
     });
 
-    await expect(runClackWizard(deps)).rejects.toThrow(
-      /could not complete a smoke prompt/,
+    await runClackWizard(deps);
+
+    expect(events).toContain(
+      "spinner.start:Determining available coding agents...",
     );
+    expect(events).toContain(
+      `select.options:${INSTRUMENTATION_MODE_MESSAGE}:Use own coding agent|Set up manually`,
+    );
+    expect(
+      events.some(
+        (event) =>
+          event.startsWith("warn:No usable coding agents found.") &&
+          event.includes("Claude Code could not complete a smoke prompt."),
+      ),
+    ).toBe(true);
+    expect(events).not.toContain(`select:${CODING_AGENT_PROCEED_MESSAGE}`);
   });
 });
 
@@ -1039,13 +1386,4 @@ function createGitTempDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "braintrust-setup-test-"));
   execFileSync("git", ["init", "--quiet"], { cwd: dir });
   return dir;
-}
-
-function expectEnvNoticeBeforeWrite(events: readonly string[]): void {
-  const noticeIndex = events.indexOf(`note.message:${ENV_BRAINTRUST_NOTICE}`);
-  const writeIndex = events.findIndex((event) =>
-    event.startsWith("success:Wrote "),
-  );
-  expect(noticeIndex).toBeGreaterThanOrEqual(0);
-  expect(writeIndex).toBeGreaterThan(noticeIndex);
 }

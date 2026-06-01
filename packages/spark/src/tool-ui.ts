@@ -1,6 +1,5 @@
-import { taskLog as defaultTaskLog } from "@clack/prompts";
+import { taskLog } from "@clack/prompts";
 
-import type { ClackWizardPrompts } from "./clack-wizard";
 import type { CodingToolEvent } from "./coding-tools";
 
 type CodingAgentOutput = {
@@ -10,14 +9,22 @@ type CodingAgentOutput = {
 };
 
 export class ClackToolRenderer {
-  private readonly output: CodingAgentOutput;
+  private output: CodingAgentOutput | undefined;
   private lastLine: string | undefined;
 
-  constructor(prompts: ClackWizardPrompts, toolLabel: string) {
-    const title = `Running ${toolLabel} to instrument your application`;
-    this.output =
-      prompts.codingAgentOutput?.({ title, toolLabel }) ??
-      new TaskLogCodingAgentOutput(prompts, title);
+  constructor(private readonly toolLabel: string) {}
+
+  private getOutput(): CodingAgentOutput {
+    return this.start();
+  }
+
+  start() {
+    if (!this.output) {
+      const title = `Running ${this.toolLabel} to instrument your application`;
+      this.output = new TaskLogCodingAgentOutput(title);
+    }
+
+    return this.output;
   }
 
   event(event: CodingToolEvent) {
@@ -26,28 +33,29 @@ export class ClackToolRenderer {
     const line = eventLine(event);
     if (line === this.lastLine) return;
     this.lastLine = line;
-    void this.output.message(line);
+    void this.getOutput().message(line);
   }
 
   async error(message: string) {
-    await this.output.fail(message);
+    await this.getOutput().fail(message);
   }
 
   async success(message: string) {
-    await this.output.success(message);
+    await this.getOutput().success(message);
   }
 }
 
 class TaskLogCodingAgentOutput implements CodingAgentOutput {
   private readonly log: Pick<
-    ReturnType<typeof defaultTaskLog>,
+    ReturnType<typeof taskLog>,
     "error" | "message" | "success"
   >;
 
-  constructor(prompts: ClackWizardPrompts, title: string) {
-    this.log = (prompts.taskLog ?? defaultTaskLog)({
+  constructor(title: string) {
+    this.log = taskLog({
       title,
       limit: 9,
+      spacing: 0,
       retainLog: false,
     });
   }
