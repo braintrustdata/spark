@@ -10,5 +10,6 @@ render(
   </AppRoot>,
   {
     alternateScreen: true,
+    maxFps: 60,
   },
 );
