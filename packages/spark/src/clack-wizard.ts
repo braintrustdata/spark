@@ -395,26 +395,15 @@ async function handleBraintrustCliSetup(
 
   if (discovery.installed) {
     if (commandPath) {
-      const installedLabel =
-        discovery.version ??
-        commandPath ??
-        COPY.braintrustCli.installedVersionUnknown;
-
-      let upToDate = false;
+      let upToDate: boolean;
       try {
         const check = await deps.braintrustCli.checkForUpdate(commandPath);
         upToDate = check.upToDate;
-      } catch (error) {
-        clack.log.warn(
-          COPY.braintrustCli.updateCheckFailed(
-            summarizeBraintrustCliError(error),
-          ),
-        );
+      } catch {
+        upToDate = false;
       }
 
-      if (upToDate) {
-        clack.log.info(COPY.braintrustCli.upToDate(installedLabel));
-      } else {
+      if (!upToDate) {
         const shouldUpdate = await selectBoolean({
           message: COPY.braintrustCli.updateQuestion,
           choices: COPY.braintrustCli.updateChoices,

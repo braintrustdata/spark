@@ -37,6 +37,36 @@ describe("Braintrust CLI runtime", () => {
     ]);
   });
 
+  it("builds the update command", async () => {
+    const calls: Array<{
+      readonly command: string;
+      readonly args: readonly string[];
+      readonly env?: NodeJS.ProcessEnv;
+    }> = [];
+    const runtime = createBraintrustCliRuntime({
+      env: { PATH: "/usr/bin" },
+      exec: (spec) => {
+        calls.push(spec);
+        return Promise.resolve({
+          exitCode: 0,
+          signal: null,
+          stdout: "",
+          stderr: "",
+        });
+      },
+    });
+
+    await runtime.update("/usr/local/bin/bt");
+
+    expect(calls).toEqual([
+      {
+        command: "/usr/local/bin/bt",
+        args: ["self", "update"],
+        env: { PATH: "/usr/bin" },
+      },
+    ]);
+  });
+
   it("passes the API key only through env when configuring auth and context", async () => {
     const calls: Array<{
       readonly command: string;

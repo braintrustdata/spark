@@ -919,14 +919,12 @@ describe("runClackWizard", () => {
     expect(events).not.toContain(`select:${CLI_UPDATE_MESSAGE}`);
     expect(events).not.toContain("spinner.start:Updating Braintrust CLI...");
     expect(
-      events.some((event) =>
-        event.startsWith("info:Braintrust CLI is up to date"),
-      ),
-    ).toBe(true);
+      events.some((event) => event.includes("Braintrust CLI is up to date")),
+    ).toBe(false);
     expect(calls).toEqual(["check:/bin/bt", "status", "login"]);
   });
 
-  it("asks to update when the update check fails", async () => {
+  it("updates when the update check fails and the user accepts", async () => {
     const calls: string[] = [];
     const { events } = createPrompts({
       selects: ["no", "yes", "manual", "confirm", "understood"],
@@ -937,6 +935,10 @@ describe("runClackWizard", () => {
           { installed: true, commandPath: "/bin/bt", version: "bt 0.10.0" },
         ],
         checkForUpdate: () => Promise.reject(new Error("network down")),
+        update: (commandPath) => {
+          calls.push(`update:${commandPath}`);
+          return Promise.resolve();
+        },
         status: () => {
           calls.push("status");
           return Promise.resolve({});
@@ -952,13 +954,11 @@ describe("runClackWizard", () => {
 
     expect(
       events.some((event) =>
-        event.startsWith(
-          "warn:Could not check for Braintrust CLI updates: network down",
-        ),
+        event.includes("Could not check for Braintrust CLI updates"),
       ),
-    ).toBe(true);
+    ).toBe(false);
     expect(events).toContain(`select:${CLI_UPDATE_MESSAGE}`);
-    expect(calls).toEqual(["status", "login"]);
+    expect(calls).toEqual(["update:/bin/bt", "status", "login"]);
   });
 
   it("updates and configures an installed Braintrust CLI when accepted", async () => {
