@@ -31,17 +31,11 @@ import {
   type CodingToolRunResult,
   type CodingToolStatus,
 } from "./coding-tools";
-import {
-  braintrustTokenFilesExist,
-  ensureEnvBraintrustIgnored,
-  isGitRepo,
-  writeEnvBraintrust,
-} from "./git";
+import { isGitRepo, writeEnvBraintrust } from "./git";
 import { allocateResultFile, readResultFile } from "./instrument";
 import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
 import { ClackToolRenderer } from "./tool-ui";
-import { terminalHyperlink } from "./wizard-utils";
 
 const COPY = CLACK_WIZARD_COPY;
 const WIZARD_CANCEL_MESSAGE = COPY.shared.cancelMessage;
@@ -196,9 +190,8 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   clack.intro(COPY.welcome.intro);
 
   if (!(await isGitRepo(deps.cwd))) {
-    clack.log.warn(COPY.gitRepository.outsideRepoWarning);
     const continueOutsideGit = await selectBoolean({
-      message: COPY.gitRepository.continueOutsideRepoQuestion,
+      message: COPY.gitRepository.outsideRepoWarning,
       choices: COPY.gitRepository.continueOutsideRepoChoices,
       yesFirst: false,
     });
@@ -219,7 +212,7 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
           authMode: (await hasBraintrustAccount()) ? "signin" : "signup",
         });
 
-  const envFilePath = await writeLocalEnvBraintrust(deps, session.apiKey);
+  await writeLocalEnvBraintrust(deps, session.apiKey);
 
   const setupSpinner = new WizardStepSpinner();
   let codingToolStatuses: readonly CodingToolStatus[];
@@ -286,11 +279,11 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   }
 
   const projectLogsUrl = `${deps.options.appUrl}/app/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
-  clack.log.info(COPY.logs.projectLogsUrl(projectLogsUrl));
+  await confirmTraceLogs(projectLogsUrl);
 
-  await confirmProductionApiKey(envFilePath);
+  await confirmProductionApiKey();
 
-  clack.outro(COPY.outro.complete(COPY.shared.instrumentationDocsUrl));
+  clack.outro(COPY.outro.complete);
 
   return {
     orgName: session.orgName,
@@ -460,11 +453,8 @@ async function handleBraintrustCliSetup(
   spinner.update(COPY.braintrustCli.checkingContext);
   try {
     currentContext = await deps.braintrustCli.status(commandPath);
-  } catch (error) {
+  } catch {
     spinner.clear();
-    clack.log.warn(
-      COPY.braintrustCli.statusFailed(summarizeBraintrustCliError(error)),
-    );
     return;
   }
 
@@ -604,55 +594,17 @@ function warnNoUsableCodingTools(statuses: readonly CodingToolStatus[]): void {
 async function writeLocalEnvBraintrust(
   deps: WizardDeps,
   apiKey: string,
-): Promise<string | undefined> {
-  const targetDirectory = deps.cwd;
-  if (await braintrustTokenFilesExist(targetDirectory)) {
-    clack.note(
-      COPY.instrumentation.localToken.existingNotice,
-      COPY.instrumentation.localToken.title,
-    );
-    const shouldReplace = await selectBoolean({
-      message: COPY.instrumentation.localToken.replaceQuestion,
-      choices: COPY.instrumentation.localToken.replaceChoices,
-      yesFirst: true,
-    });
-    if (!shouldReplace) {
-      const gitignoreResult = await ensureEnvBraintrustIgnored(targetDirectory);
-      const gitignoreNote = COPY.instrumentation.localToken.gitignoreNote({
-        added: gitignoreResult.addedToGitignore,
-        alreadyCovered: gitignoreResult.alreadyCovered,
-      });
-      clack.log.info(COPY.instrumentation.localToken.keptTokenFiles());
-      if (gitignoreNote) clack.log.info(gitignoreNote);
-      return undefined;
-    }
-  } else {
-    clack.note(
-      COPY.instrumentation.localToken.notice,
-      COPY.instrumentation.localToken.title,
-    );
-  }
-
-  const result = await writeEnvBraintrust(targetDirectory, apiKey);
-  const envFilePath = relative(targetDirectory, result.envFilePath);
-  const gitignoreNote = COPY.instrumentation.localToken.gitignoreNote({
-    added: result.addedToGitignore,
-    alreadyCovered: result.alreadyCovered,
-  });
-  if (gitignoreNote) clack.log.info(gitignoreNote);
-  return envFilePath;
+): Promise<string> {
+  const result = await writeEnvBraintrust(deps.cwd, apiKey);
+  return relative(deps.cwd, result.envFilePath);
 }
 
 async function confirmManualInstrumentation(): Promise<void> {
-  clack.note(
-    COPY.instrumentation.manual.note(
-      terminalHyperlink(COPY.shared.instrumentationDocsUrl),
-    ),
-    COPY.instrumentation.manual.title,
-  );
   unwrap(
     await clack.select<"confirm">({
-      message: COPY.instrumentation.manual.completedQuestion,
+      message: COPY.instrumentation.manual.completedQuestion(
+        COPY.shared.instrumentationDocsUrl,
+      ),
       options: [
         {
           label: COPY.instrumentation.manual.completedChoices.confirm.label,
@@ -722,22 +674,30 @@ function printInstrumentationPrompt(promptText: string): void {
   process.stdout.write(`\n${promptText}\n\n`);
 }
 
-async function confirmProductionApiKey(
-  envFilePath: string | undefined,
-): Promise<void> {
-  clack.note(
-    envFilePath
-      ? COPY.productionToken.noteWithEnvFile(envFilePath)
-      : COPY.productionToken.noteWithoutEnvFile,
-    COPY.productionToken.title,
-  );
+async function confirmTraceLogs(projectLogsUrl: string): Promise<void> {
   unwrap(
-    await clack.select<"understood">({
+    await clack.select<"checked">({
+      message: COPY.logs.checkQuestion(projectLogsUrl),
+      options: [
+        {
+          label: COPY.logs.checked,
+          value: "checked",
+          hint: COPY.logs.hint,
+        },
+      ],
+    }),
+  );
+}
+
+async function confirmProductionApiKey(): Promise<void> {
+  unwrap(
+    await clack.select<"confirmed">({
       message: COPY.productionToken.question,
       options: [
         {
-          label: COPY.productionToken.understood,
-          value: "understood",
+          label: COPY.productionToken.confirmed,
+          value: "confirmed",
+          hint: COPY.productionToken.hint,
         },
       ],
     }),
