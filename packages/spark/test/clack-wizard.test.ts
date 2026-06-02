@@ -196,7 +196,7 @@ const WIZARD_INTRO = "Braintrust Setup Wizard";
 const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
 const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_MODE_MESSAGE =
-  "How do you want to add Braintrust instrumentation?";
+  "How do you want to add Braintrust to your application?";
 const CLI_INSTALL_MESSAGE = "Install Braintrust CLI?";
 const CLI_UPDATE_MESSAGE = "Update Braintrust CLI to the latest version?";
 const TOOL_SELECT_MESSAGE = "Which coding agent should Braintrust Setup use?";
