@@ -7,9 +7,20 @@ const BRAINTRUST_CLI_CONTEXT_FALLBACKS = {
   project: "no project",
 } as const;
 
+const GITHUB_ISSUE_URL = "https://github.com/braintrustdata/spark/issues/new";
+const SUPPORT_URL = "https://www.braintrust.dev/contact";
+const INSTRUMENTATION_DOCS_URL = "https://www.braintrust.dev/docs/instrument";
+
 export const CLACK_WIZARD_COPY = {
   shared: {
-    cancelMessage: "Wizard cancelled.",
+    cancelMessage: [
+      "Wizard cancelled.",
+      "",
+      `If you ran into an issue, please open a GitHub issue: ${GITHUB_ISSUE_URL}`,
+      "",
+      chalk.dim(`- Contact support: ${SUPPORT_URL}`),
+      chalk.dim(`- Further documentation: ${INSTRUMENTATION_DOCS_URL}`),
+    ].join("\n"),
     instrumentationDocsUrl:
       "https://www.braintrust.dev/docs/instrument/trace-llm-calls",
   },
@@ -245,12 +256,10 @@ export const CLACK_WIZARD_COPY = {
       "",
       "You can now use Braintrust in production.",
       "",
-      "If you encountered any issues during setup, please open an issue at https://github.com/braintrustdata/spark/issues/new.",
+      `If you encountered any issues during setup, please open an issue at ${GITHUB_ISSUE_URL}.`,
       "",
-      chalk.dim("- Contact support: https://www.braintrust.dev/contact"),
-      chalk.dim(
-        "- Further documentation: https://www.braintrust.dev/docs/instrument",
-      ),
+      chalk.dim(`- Contact support: ${SUPPORT_URL}`),
+      chalk.dim(`- Further documentation: ${INSTRUMENTATION_DOCS_URL}`),
     ].join("\n"),
   },
 } as const;

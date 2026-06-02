@@ -194,7 +194,14 @@ vi.mock("@clack/prompts", () => ({
 }));
 
 const WIZARD_INTRO = "Braintrust Setup Wizard";
-const WIZARD_CANCEL_MESSAGE = "Wizard cancelled.";
+const WIZARD_CANCEL_MESSAGE = [
+  "Wizard cancelled.",
+  "",
+  "If you ran into an issue, please open a GitHub issue: https://github.com/braintrustdata/spark/issues/new",
+  "",
+  "- Contact support: https://www.braintrust.dev/contact",
+  "- Further documentation: https://www.braintrust.dev/docs/instrument",
+].join("\n");
 const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_MODE_MESSAGE =
   "How do you want to add Braintrust to your application?";
