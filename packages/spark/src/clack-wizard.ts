@@ -394,22 +394,36 @@ async function handleBraintrustCliSetup(
   let commandPath = discovery.commandPath;
 
   if (discovery.installed) {
-    const shouldUpdate = await selectBoolean({
-      message: COPY.braintrustCli.updateQuestion,
-      choices: COPY.braintrustCli.updateChoices,
-      yesFirst: true,
-    });
-    if (shouldUpdate && commandPath) {
-      spinner.update(COPY.braintrustCli.updating);
+    if (commandPath) {
+      let upToDate: boolean;
       try {
-        await deps.braintrustCli.update(commandPath);
-        discovery = await deps.braintrustCli.discover();
-        commandPath = discovery.commandPath ?? commandPath;
-      } catch (error) {
-        spinner.clear();
-        clack.log.warn(
-          COPY.braintrustCli.updateFailed(summarizeBraintrustCliError(error)),
-        );
+        const check = await deps.braintrustCli.checkForUpdate(commandPath);
+        upToDate = check.upToDate;
+      } catch {
+        upToDate = false;
+      }
+
+      if (!upToDate) {
+        const shouldUpdate = await selectBoolean({
+          message: COPY.braintrustCli.updateQuestion,
+          choices: COPY.braintrustCli.updateChoices,
+          yesFirst: true,
+        });
+        if (shouldUpdate) {
+          spinner.update(COPY.braintrustCli.updating);
+          try {
+            await deps.braintrustCli.update(commandPath);
+            discovery = await deps.braintrustCli.discover();
+            commandPath = discovery.commandPath ?? commandPath;
+          } catch (error) {
+            spinner.clear();
+            clack.log.warn(
+              COPY.braintrustCli.updateFailed(
+                summarizeBraintrustCliError(error),
+              ),
+            );
+          }
+        }
       }
     }
   } else {

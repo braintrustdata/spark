@@ -65,7 +65,6 @@ export const CLACK_WIZARD_COPY = {
   },
 
   braintrustCli: {
-    installedVersionUnknown: "version unknown",
     installQuestion: "Install Braintrust CLI?",
     installChoices: {
       yes: {
@@ -122,7 +121,7 @@ export const CLACK_WIZARD_COPY = {
   },
 
   instrumentation: {
-    modeQuestion: "How do you want to add Braintrust instrumentation?",
+    modeQuestion: "How do you want to add Braintrust to your application?",
     modes: {
       builtIn: {
         label: "Use built-in coding agent",
