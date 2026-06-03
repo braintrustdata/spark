@@ -1,6 +1,6 @@
 {
   "name": "braintrust-setup",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "private": true,
   "description": "CLI wizard to get your project set up with Braintrust",
   "license": "MIT",
