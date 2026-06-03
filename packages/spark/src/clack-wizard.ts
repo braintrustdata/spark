@@ -201,16 +201,25 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     }
   }
 
-  const session =
-    deps.options.apiKey !== undefined && deps.options.projectId !== undefined
-      ? await loginWithCiCredentials({
-          apiKey: deps.options.apiKey,
-          projectId: deps.options.projectId,
-          apiUrl: deps.options.apiUrl,
-        })
-      : await loginWithBrowser(deps, {
-          authMode: (await hasBraintrustAccount()) ? "signin" : "signup",
-        });
+  let session: WizardSessionCompleteResult;
+  if (
+    deps.options.apiKey !== undefined &&
+    deps.options.projectId !== undefined
+  ) {
+    session = await loginWithCiCredentials({
+      apiKey: deps.options.apiKey,
+      projectId: deps.options.projectId,
+      apiUrl: deps.options.apiUrl,
+    });
+  } else {
+    const authMode =
+      deps.options.orgId !== undefined && deps.options.projId !== undefined
+        ? "signin"
+        : (await hasBraintrustAccount())
+          ? "signin"
+          : "signup";
+    session = await loginWithBrowser(deps, { authMode });
+  }
 
   await writeLocalEnvBraintrust(deps, session.apiKey);
 

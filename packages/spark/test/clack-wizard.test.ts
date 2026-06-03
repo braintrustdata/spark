@@ -302,6 +302,7 @@ function buildDeps(
     readonly codingTools?: CodingToolRuntime;
     readonly braintrustCli?: BraintrustCliRuntime;
     readonly writeClipboard?: (text: string) => Promise<void>;
+    readonly options?: Partial<WizardDeps["options"]>;
   } = {},
 ): WizardDeps {
   const cwd = args.cwd ?? createGitTempDir();
@@ -330,6 +331,7 @@ function buildDeps(
       orgId: undefined,
       projId: undefined,
       yolo: false,
+      ...args.options,
     },
     loginWithWizardSession: stubLogin,
     openBrowser: () => Promise.resolve(true),
@@ -698,6 +700,37 @@ describe("runClackWizard", () => {
       await runClackWizard(deps);
       expect(authMode).toBe(expectedAuthMode);
     }
+  });
+
+  it("skips the account question when browser org and project ids are provided", async () => {
+    let loginUrlParams: WizardSessionLoginArgs["loginUrlParams"];
+    const { events } = createPrompts({
+      selects: ["no", "manual", "confirm", "checked", "confirmed"],
+    });
+    const deps = buildDeps({
+      options: { orgId: "org-123", projId: "proj-456" },
+      loginWithWizardSession: async ({ events, loginUrlParams: params }) => {
+        loginUrlParams = params;
+        events.onLoginUrl({
+          loginUrl: "https://app.test/app/cli-login?session_token=test",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          verificationCode: "123456",
+        });
+        await events.onTryOpenBrowser(
+          "https://app.test/app/cli-login?session_token=test",
+        );
+        return DEFAULT_LOGIN_RESULT;
+      },
+    });
+
+    await runClackWizard(deps);
+
+    expect(events).not.toContain(`select:${ACCOUNT_QUESTION}`);
+    expect(loginUrlParams).toEqual({
+      orgId: "org-123",
+      projectId: "proj-456",
+      authMode: "signin",
+    });
   });
 
   it("overwrites existing local token files without prompting", async () => {
