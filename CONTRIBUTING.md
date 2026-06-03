@@ -39,7 +39,7 @@ Stable releases use the manual `Release` workflow.
 
 The workflow validates the version, creates a timestamped `release/v<version>-<timestamp>` branch, commits the version bump to `packages/spark/package.json`, opens a PR, verifies the release commit, builds all binary artifacts, and creates the GitHub Release for `v<version>`. After the release succeeds, it enables auto-merge on the version-bump PR.
 
-This repository uses `GITHUB_TOKEN` for release automation. Pull requests created by `GITHUB_TOKEN` may still need a human to approve PR workflow runs, and `main` requires review and passing checks. Auto-merge is enabled after publishing, but the PR may wait until those requirements are satisfied before the version bump lands on `main`.
+Stable release automation uses the Braintrust bot GitHub App token for branch, PR, release, and auto-merge operations so release PRs can run the normal CI workflow. `main` still requires review and passing checks. Auto-merge is enabled after publishing, but the PR may wait until those requirements are satisfied before the version bump lands on `main`.
 
 Pre-releases use the manual `Pre-release` workflow.
 
