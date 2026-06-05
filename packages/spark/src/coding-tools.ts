@@ -1,6 +1,8 @@
 export {
   buildClaudeCommandForTest,
+  buildClaudeSmokeCommandForTest,
   buildCodexCommandForTest,
+  buildCodexSmokeCommandForTest,
   codingToolLabel,
   discoverCodingTools,
   parseClaudeEventForTest,

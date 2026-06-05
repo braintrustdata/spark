@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildClaudeCommandForTest,
+  buildClaudeSmokeCommandForTest,
   buildCodexCommandForTest,
+  buildCodexSmokeCommandForTest,
   parseClaudeEventForTest,
   parseClaudeEventsForTest,
   parseClaudeStatusForTest,
@@ -115,6 +117,25 @@ describe("coding tool command construction", () => {
     expect(spec.stdin).toBe("prompt");
   });
 
+  it("builds low-cost Claude Code smoke command", () => {
+    const spec = buildClaudeSmokeCommandForTest({
+      commandPath: "/bin/claude",
+      cwd: CWD,
+      prompt: "prompt",
+    });
+
+    expect(spec.command).toBe("/bin/claude");
+    expect(spec.args).toContain("--model");
+    expect(spec.args).toContain("haiku");
+    expect(spec.args).toContain("--effort");
+    expect(spec.args).toContain("low");
+    expect(spec.args).toContain("--tools");
+    expect(spec.args).toContain("");
+    expect(spec.args).not.toContain("bypassPermissions");
+    expect(spec.args).not.toContain("--dangerously-skip-permissions");
+    expect(spec.stdin).toBe("prompt");
+  });
+
   it("builds autonomous Codex command", () => {
     const spec = buildCodexCommandForTest({
       commandPath: "/bin/codex",
@@ -131,6 +152,27 @@ describe("coding tool command construction", () => {
     expect(spec.args).toContain("danger-full-access");
     expect(spec.args).toContain("--dangerously-bypass-approvals-and-sandbox");
     expect(spec.args).not.toContain("workspace-write");
+    expect(spec.args.at(-1)).toBe("-");
+    expect(spec.stdin).toBe("prompt");
+  });
+
+  it("builds low-cost Codex smoke command", () => {
+    const spec = buildCodexSmokeCommandForTest({
+      commandPath: "/bin/codex",
+      cwd: CWD,
+      prompt: "prompt",
+    });
+
+    expect(spec.command).toBe("/bin/codex");
+    expect(spec.args).toContain("--json");
+    expect(spec.args).toContain("--model");
+    expect(spec.args).toContain("gpt-5.4-mini");
+    expect(spec.args).toContain('model_reasoning_effort="low"');
+    expect(spec.args).toContain("read-only");
+    expect(spec.args).not.toContain("danger-full-access");
+    expect(spec.args).not.toContain(
+      "--dangerously-bypass-approvals-and-sandbox",
+    );
     expect(spec.args.at(-1)).toBe("-");
     expect(spec.stdin).toBe("prompt");
   });

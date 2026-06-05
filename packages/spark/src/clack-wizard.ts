@@ -25,6 +25,7 @@ import {
   codingToolLabel,
   discoverCodingTools,
   runCodingTool,
+  smokeTestCodingTool,
   type CodingToolId,
   type CodingToolEvent,
   type CodingToolRunResult,
@@ -123,6 +124,10 @@ export type WizardDeps = {
 
 export type CodingToolRuntime = {
   readonly discover: () => Promise<readonly CodingToolStatus[]>;
+  readonly smokeTest: (args: {
+    readonly id: CodingToolId;
+    readonly cwd: string;
+  }) => Promise<CodingToolRunResult>;
   readonly run: (args: {
     readonly id: CodingToolId;
     readonly cwd: string;
@@ -524,7 +529,28 @@ async function preflightCodingTools(
 ): Promise<readonly CodingToolStatus[]> {
   spinner.update(COPY.instrumentation.builtIn.determiningAvailable);
   try {
-    return await deps.codingTools.discover();
+    const statuses = await deps.codingTools.discover();
+    return await Promise.all(
+      statuses.map(async (status) => {
+        if (!status.usable) return status;
+
+        try {
+          await deps.codingTools.smokeTest({
+            id: status.id,
+            cwd: deps.cwd,
+          });
+          return status;
+        } catch (error) {
+          const message =
+            error instanceof Error ? error.message : String(error);
+          return {
+            ...status,
+            usable: false,
+            unavailableReason: message || "Smoke test failed.",
+          };
+        }
+      }),
+    );
   } finally {
     spinner.clear();
   }
@@ -804,6 +830,7 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
     braintrustCli: createBraintrustCliRuntime({ env }),
     codingTools: {
       discover: discoverCodingTools,
+      smokeTest: smokeTestCodingTool,
       run: runCodingTool,
     },
   };

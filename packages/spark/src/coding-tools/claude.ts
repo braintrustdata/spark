@@ -23,6 +23,10 @@ export const claudeAdapter: Adapter = {
     command: commandPath,
     args: [
       "-p",
+      "--model",
+      "haiku",
+      "--effort",
+      "low",
       "--verbose",
       "--output-format",
       "stream-json",

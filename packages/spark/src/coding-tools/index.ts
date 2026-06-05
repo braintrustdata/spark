@@ -100,6 +100,14 @@ export function buildClaudeCommandForTest(args: {
   return adapterFor("claude").runCommand(args);
 }
 
+export function buildClaudeSmokeCommandForTest(args: {
+  readonly commandPath: string;
+  readonly cwd: string;
+  readonly prompt: string;
+}): CommandSpec {
+  return adapterFor("claude").smokeCommand(args);
+}
+
 export function buildCodexCommandForTest(args: {
   readonly commandPath: string;
   readonly cwd: string;
@@ -107,6 +115,14 @@ export function buildCodexCommandForTest(args: {
   readonly env: NodeJS.ProcessEnv;
 }): CommandSpec {
   return adapterFor("codex").runCommand(args);
+}
+
+export function buildCodexSmokeCommandForTest(args: {
+  readonly commandPath: string;
+  readonly cwd: string;
+  readonly prompt: string;
+}): CommandSpec {
+  return adapterFor("codex").smokeCommand(args);
 }
 
 export function parseClaudeEventForTest(

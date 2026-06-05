@@ -351,6 +351,12 @@ function buildDeps(
               authMode: "pro",
             },
           ]),
+        smokeTest: () =>
+          Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          }),
         run: ({ env, onEvent, prompt }) => {
           expect(env["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
           expect(env["BT_WIZARD_RESULT_FILE"]).toBeDefined();
@@ -545,6 +551,8 @@ describe("runClackWizard", () => {
 
   it("preflights available coding agents before asking for instrumentation mode", async () => {
     const calls: string[] = [];
+    let activeSmokeTests = 0;
+    let maxActiveSmokeTests = 0;
     const { events } = createPrompts({
       selects: [
         "yes",
@@ -577,6 +585,18 @@ describe("runClackWizard", () => {
             },
           ]);
         },
+        smokeTest: async ({ id }) => {
+          calls.push(`smoke:${id}`);
+          activeSmokeTests += 1;
+          maxActiveSmokeTests = Math.max(maxActiveSmokeTests, activeSmokeTests);
+          await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          activeSmokeTests -= 1;
+          return {
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          };
+        },
         run: ({ onEvent }) => {
           onEvent({ type: "completed", message: "Done" });
           return Promise.resolve({
@@ -590,7 +610,12 @@ describe("runClackWizard", () => {
 
     await runClackWizard(deps);
 
-    expect(calls).toEqual(["discover"]);
+    expect(calls.slice(0, 3)).toEqual([
+      "discover",
+      "smoke:claude",
+      "smoke:codex",
+    ]);
+    expect(maxActiveSmokeTests).toBe(2);
     expect(events).toContain(`select:${TOOL_SELECT_MESSAGE}`);
     const codingAgentSpinnerStart = events.indexOf(
       `spinner.start:${CODING_AGENT_SCAN_MESSAGE}`,
@@ -1265,6 +1290,7 @@ describe("runClackWizard", () => {
   });
 
   it("cancels cleanly when the user aborts the tool select", async () => {
+    const smokeCalls: string[] = [];
     const { events } = createPrompts({
       selects: ["yes", "no", "first", CANCEL],
     });
@@ -1287,12 +1313,21 @@ describe("runClackWizard", () => {
               usable: true,
             },
           ]),
+        smokeTest: ({ id }) => {
+          smokeCalls.push(id);
+          return Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          });
+        },
         run: () => Promise.reject(new Error("should not run")),
       },
     });
 
     await expect(runClackWizard(deps)).rejects.toThrow(WizardCancelledError);
     expect(events).toContain(`cancel:${WIZARD_CANCEL_MESSAGE}`);
+    expect(smokeCalls).toEqual(["claude", "codex"]);
   });
 
   it("offers own-agent and manual setup when built-in coding agent execution is aborted", async () => {
@@ -1322,6 +1357,14 @@ describe("runClackWizard", () => {
               usable: true,
             },
           ]),
+        smokeTest: () => {
+          calls.push("smoke");
+          return Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          });
+        },
         run: () => {
           calls.push("run");
           return Promise.reject(new Error("should not run"));
@@ -1341,7 +1384,7 @@ describe("runClackWizard", () => {
     expect(events).not.toContain(
       "taskLog:Running Claude Code to instrument your application:0:false",
     );
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(["smoke"]);
   });
 
   it("asks before continuing when not in a git repo", async () => {
@@ -1528,7 +1571,7 @@ describe("runClackWizard", () => {
     ).toBe(true);
   });
 
-  it("omits built-in setup when coding agent discovery finds no usable tools", async () => {
+  it("omits built-in setup when preflight smoke tests fail", async () => {
     const { events } = createPrompts({
       selects: ["yes", "no", "manual", "confirm", "checked", "confirmed"],
     });
@@ -1541,10 +1584,13 @@ describe("runClackWizard", () => {
               label: "Claude Code",
               command: "claude",
               installed: true,
-              usable: false,
-              unavailableReason: "Claude Code is not logged in.",
+              usable: true,
             },
           ]),
+        smokeTest: () =>
+          Promise.reject(
+            new Error("Claude Code could not complete a smoke prompt."),
+          ),
         run: () => Promise.reject(new Error("should not run")),
       },
     });
@@ -1559,7 +1605,7 @@ describe("runClackWizard", () => {
       events.some(
         (event) =>
           event.startsWith("warn:No usable coding agents found.") &&
-          event.includes("Claude Code is not logged in."),
+          event.includes("Claude Code could not complete a smoke prompt."),
       ),
     ).toBe(true);
     expect(events).not.toContain(`select:${CODING_AGENT_PROCEED_MESSAGE}`);
