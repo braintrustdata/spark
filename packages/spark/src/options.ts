@@ -19,7 +19,6 @@ function buildParser() {
   return yargs([])
     .scriptName("braintrust-setup")
     .usage("$0 [options]")
-    .env("BRAINTRUST")
     .option("api-url", {
       type: "string",
       description: "Override API URL",

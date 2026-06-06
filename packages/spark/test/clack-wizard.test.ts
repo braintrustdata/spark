@@ -841,31 +841,16 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "spinner.message:Checking Braintrust CLI login state...",
     );
-    expect(events).toContain(
-      "spinner.message:Configuring Braintrust CLI login state...",
-    );
     expect(events).toContain(`spinner.message:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(events).toContain("spinner.clear");
     expect(events).not.toContain("spinner.stop:Installed Braintrust CLI.");
     expect(events).not.toContain("success:Configured Braintrust CLI.");
-    const configureSpinnerIndex = events.indexOf(
+    expect(events).not.toContain(
       "spinner.message:Configuring Braintrust CLI login state...",
     );
-    const codingAgentSpinnerIndex = events.indexOf(
-      `spinner.message:${CODING_AGENT_SCAN_MESSAGE}`,
-    );
-    expect(codingAgentSpinnerIndex).toBeGreaterThan(configureSpinnerIndex);
-    expect(
-      events.slice(configureSpinnerIndex, codingAgentSpinnerIndex),
-    ).not.toContain("spinner.clear");
     expect(events).not.toContain(`spinner.start:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(
       events.indexOf("spinner.message:Checking Braintrust CLI login state..."),
-    ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
-    expect(
-      events.indexOf(
-        "spinner.message:Configuring Braintrust CLI login state...",
-      ),
     ).toBeLessThan(events.indexOf(`select:${INSTRUMENTATION_MODE_MESSAGE}`));
     expect(calls).toEqual([
       "install",
@@ -1045,23 +1030,13 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "spinner.message:Checking Braintrust CLI login state...",
     );
-    expect(events).toContain(
-      "spinner.message:Configuring Braintrust CLI login state...",
-    );
     expect(events).toContain(`spinner.message:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(events).toContain("spinner.clear");
     expect(events).not.toContain("spinner.stop:Updated Braintrust CLI.");
     expect(events).not.toContain("success:Configured Braintrust CLI.");
-    const configureSpinnerIndex = events.indexOf(
+    expect(events).not.toContain(
       "spinner.message:Configuring Braintrust CLI login state...",
     );
-    const codingAgentSpinnerIndex = events.indexOf(
-      `spinner.message:${CODING_AGENT_SCAN_MESSAGE}`,
-    );
-    expect(codingAgentSpinnerIndex).toBeGreaterThan(configureSpinnerIndex);
-    expect(
-      events.slice(configureSpinnerIndex, codingAgentSpinnerIndex),
-    ).not.toContain("spinner.clear");
     expect(events).not.toContain(`spinner.start:${CODING_AGENT_SCAN_MESSAGE}`);
     expect(calls).toEqual(["update:/bin/bt", "status:/bin/bt", "login"]);
   });
@@ -1131,7 +1106,7 @@ describe("runClackWizard", () => {
     expect(events).toContain(
       "spinner.start:Checking Braintrust CLI login state...",
     );
-    expect(events).toContain(
+    expect(events).not.toContain(
       "spinner.message:Configuring Braintrust CLI login state...",
     );
     expect(calls).toEqual(["login"]);
@@ -1229,7 +1204,11 @@ describe("runClackWizard", () => {
 
   it("switches a different Braintrust CLI context when accepted", async () => {
     const calls: string[] = [];
-    createPrompts({
+    let finishSwitch!: () => void;
+    const switchDone = new Promise<void>((resolve) => {
+      finishSwitch = resolve;
+    });
+    const { events } = createPrompts({
       selects: [
         "yes",
         "no",
@@ -1249,14 +1228,59 @@ describe("runClackWizard", () => {
           Promise.resolve({ profile: "work", org: "other", project: "old" }),
         loginAndSwitch: () => {
           calls.push("login");
-          return Promise.resolve();
+          return switchDone;
         },
       }),
+      codingTools: {
+        discover: () => {
+          calls.push("discover-coding-tools");
+          return Promise.resolve([
+            {
+              id: "claude",
+              label: "Claude Code",
+              command: "claude",
+              installed: true,
+              usable: true,
+              authMode: "pro",
+            },
+          ]);
+        },
+        smokeTest: () =>
+          Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          }),
+        run: () =>
+          Promise.resolve({
+            exitCode: 0,
+            signal: null,
+            finalText: "BRAINTRUST_SETUP_TOOL_OK",
+          }),
+      },
     });
 
-    await runClackWizard(deps);
+    let runComplete = false;
+    const runPromise = runClackWizard(deps).then(() => {
+      runComplete = true;
+    });
+    await vi.waitFor(() => {
+      expect(calls).toEqual(["login", "discover-coding-tools"]);
+      expect(events).toContain(
+        "select:How do you want to add Braintrust to your application?",
+      );
+    });
+    expect(runComplete).toBe(false);
 
-    expect(calls).toEqual(["login"]);
+    finishSwitch();
+    await runPromise;
+
+    expect(runComplete).toBe(true);
+    expect(calls).toEqual(["login", "discover-coding-tools"]);
+    expect(events).not.toContain(
+      "spinner.start:Configuring Braintrust CLI login state...",
+    );
+    expect(events).toContain(`spinner.start:${CODING_AGENT_SCAN_MESSAGE}`);
   });
 
   it("does not configure the Braintrust CLI when status inspection fails", async () => {

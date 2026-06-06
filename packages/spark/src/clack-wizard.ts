@@ -62,6 +62,33 @@ type InstrumentationModeChoice =
 
 type OwnAgentPromptDelivery = "clipboard" | "terminal";
 
+type BraintrustCliBackgroundTask = {
+  readonly wait: (spinner: WizardStepSpinner) => Promise<void>;
+};
+
+function createBraintrustCliBackgroundTask(
+  task: Promise<unknown>,
+): BraintrustCliBackgroundTask {
+  const result = task.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+
+  return {
+    wait: async (waitSpinner) => {
+      const error = await result;
+      if (error !== undefined) {
+        waitSpinner.clear();
+        clack.log.warn(
+          COPY.braintrustCli.configureFailed(
+            summarizeBraintrustCliError(error),
+          ),
+        );
+      }
+    },
+  };
+}
+
 const BUILT_IN_INSTRUMENTATION_CHOICE: BuiltInInstrumentationChoice = {
   id: "built-in",
   label: COPY.instrumentation.modes.builtIn.label,
@@ -225,8 +252,13 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
 
   const setupSpinner = new WizardStepSpinner();
   let codingToolStatuses: readonly CodingToolStatus[];
+  let braintrustCliBackgroundTask: BraintrustCliBackgroundTask | undefined;
   try {
-    await handleBraintrustCliSetup(deps, session, setupSpinner);
+    braintrustCliBackgroundTask = await handleBraintrustCliSetup(
+      deps,
+      session,
+      setupSpinner,
+    );
     codingToolStatuses = await preflightCodingTools(deps, setupSpinner);
   } finally {
     setupSpinner.clear();
@@ -242,6 +274,8 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     await selectInstrumentationMode({
       includeBuiltIn: hasUsableCodingTool,
     });
+  await braintrustCliBackgroundTask?.wait(setupSpinner);
+  setupSpinner.clear();
 
   if (instrumentationMode.id === "built-in") {
     const instrumentation = await selectBuiltInCodingTool(codingToolStatuses);
@@ -391,7 +425,7 @@ async function handleBraintrustCliSetup(
   deps: WizardDeps,
   session: WizardSessionCompleteResult,
   spinner: WizardStepSpinner,
-): Promise<void> {
+): Promise<BraintrustCliBackgroundTask | undefined> {
   let discovery = await deps.braintrustCli.discover();
   let commandPath = discovery.commandPath;
 
@@ -434,7 +468,7 @@ async function handleBraintrustCliSetup(
       choices: COPY.braintrustCli.installChoices,
       yesFirst: true,
     });
-    if (!shouldInstall) return;
+    if (!shouldInstall) return undefined;
 
     spinner.update(COPY.braintrustCli.installing);
     try {
@@ -444,7 +478,7 @@ async function handleBraintrustCliSetup(
       clack.log.warn(
         COPY.braintrustCli.installFailed(summarizeBraintrustCliError(error)),
       );
-      return;
+      return undefined;
     }
 
     discovery = await deps.braintrustCli.discover();
@@ -452,11 +486,11 @@ async function handleBraintrustCliSetup(
     if (!discovery.installed || !commandPath) {
       spinner.clear();
       clack.log.warn(COPY.braintrustCli.installedButNotFound);
-      return;
+      return undefined;
     }
   }
 
-  if (!commandPath) return;
+  if (!commandPath) return undefined;
 
   let currentContext: BraintrustCliContext;
   spinner.update(COPY.braintrustCli.checkingContext);
@@ -464,7 +498,7 @@ async function handleBraintrustCliSetup(
     currentContext = await deps.braintrustCli.status(commandPath);
   } catch {
     spinner.clear();
-    return;
+    return undefined;
   }
 
   const targetContext = {
@@ -483,25 +517,29 @@ async function handleBraintrustCliSetup(
       yesFirst: true,
     });
     if (!shouldSwitch) {
-      return;
+      return undefined;
     }
+
+    return createBraintrustCliBackgroundTask(
+      deps.braintrustCli.loginAndSwitch(commandPath, {
+        apiKey: session.apiKey,
+        apiUrl: deps.options.apiUrl,
+        appUrl: deps.options.appUrl,
+        orgName: session.orgName,
+        projectName: session.projectName,
+      }),
+    );
   }
 
-  spinner.update(COPY.braintrustCli.configuringContext);
-  try {
-    await deps.braintrustCli.loginAndSwitch(commandPath, {
+  return createBraintrustCliBackgroundTask(
+    deps.braintrustCli.loginAndSwitch(commandPath, {
       apiKey: session.apiKey,
       apiUrl: deps.options.apiUrl,
       appUrl: deps.options.appUrl,
       orgName: session.orgName,
       projectName: session.projectName,
-    });
-  } catch (error) {
-    spinner.clear();
-    clack.log.warn(
-      COPY.braintrustCli.configureFailed(summarizeBraintrustCliError(error)),
-    );
-  }
+    }),
+  );
 }
 
 function braintrustCliContextConflicts(
