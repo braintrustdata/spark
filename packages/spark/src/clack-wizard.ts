@@ -31,7 +31,11 @@ import {
   type CodingToolRunResult,
   type CodingToolStatus,
 } from "./coding-tools";
-import { isGitRepo, writeEnvBraintrust } from "./git";
+import {
+  getUncommittedOrUntrackedFiles,
+  isGitRepo,
+  writeEnvBraintrust,
+} from "./git";
 import { allocateResultFile, readResultFile } from "./instrument";
 import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
@@ -189,7 +193,8 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   process.stdout.write("\n");
   clack.intro(COPY.welcome.intro);
 
-  if (!(await isGitRepo(deps.cwd))) {
+  const inGitRepo = await isGitRepo(deps.cwd);
+  if (!inGitRepo) {
     const continueOutsideGit = await selectBoolean({
       message: COPY.gitRepository.outsideRepoWarning,
       choices: COPY.gitRepository.continueOutsideRepoChoices,
@@ -198,6 +203,19 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     if (!continueOutsideGit) {
       clack.cancel(WIZARD_CANCEL_MESSAGE);
       throw new WizardCancelledError();
+    }
+  } else {
+    const dirtyFiles = await getUncommittedOrUntrackedFiles(deps.cwd);
+    if (dirtyFiles.length > 0) {
+      const continueWithDirtyRepo = await selectBoolean({
+        message: COPY.gitRepository.dirtyRepoWarning(dirtyFiles),
+        choices: COPY.gitRepository.continueWithDirtyRepoChoices,
+        yesFirst: false,
+      });
+      if (!continueWithDirtyRepo) {
+        clack.cancel(WIZARD_CANCEL_MESSAGE);
+        throw new WizardCancelledError();
+      }
     }
   }
 

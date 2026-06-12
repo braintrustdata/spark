@@ -10,6 +10,7 @@ const BRAINTRUST_CLI_CONTEXT_FALLBACKS = {
 const GITHUB_ISSUE_URL = "https://github.com/braintrustdata/spark/issues/new";
 const SUPPORT_URL = "https://www.braintrust.dev/contact";
 const INSTRUMENTATION_DOCS_URL = "https://www.braintrust.dev/docs/instrument";
+const DIRTY_GIT_FILE_LIMIT = 20;
 
 export const CLACK_WIZARD_COPY = {
   shared: {
@@ -39,6 +40,32 @@ export const CLACK_WIZARD_COPY = {
       no: {
         label: "No (recommended)",
         hint: "Stop wizard",
+      },
+    },
+    dirtyRepoWarning: (files: readonly string[]) => {
+      const visibleFiles = files.slice(0, DIRTY_GIT_FILE_LIMIT);
+      const remainingFileCount = files.length - visibleFiles.length;
+      return [
+        `${chalk.yellow.bold("Git changes detected.")} This repository already has local changes:`,
+        "",
+        ...visibleFiles.map((file, index) =>
+          chalk.dim(`${index + 1}. ${file}`),
+        ),
+        ...(remainingFileCount > 0
+          ? [chalk.dim(`... plus ${remainingFileCount} more`)]
+          : []),
+        "",
+        `Braintrust Setup can continue, but its edits will be mixed with these changes. ${chalk.bold("Continue?")}`,
+      ].join("\n");
+    },
+    continueWithDirtyRepoChoices: {
+      yes: {
+        label: "Yes",
+        hint: "Continue",
+      },
+      no: {
+        label: "No",
+        hint: "Cancel setup and close wizard",
       },
     },
   },
