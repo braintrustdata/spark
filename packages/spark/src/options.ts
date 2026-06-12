@@ -19,6 +19,7 @@ function buildParser() {
   return yargs([])
     .scriptName("braintrust-setup")
     .usage("$0 [options]")
+    .env("BRAINTRUST")
     .option("api-url", {
       type: "string",
       description: "Override API URL",
@@ -38,6 +39,18 @@ function buildParser() {
     .option("proj-id", {
       type: "string",
       description: "Braintrust project ID to pass to browser sign-in",
+    })
+    .option("setup-api-key", {
+      type: "string",
+      hidden: true,
+    })
+    .option("setup-project-id", {
+      type: "string",
+      hidden: true,
+    })
+    .option("setup-yolo", {
+      type: "boolean",
+      hidden: true,
     })
     .help()
     .alias("h", "help")
