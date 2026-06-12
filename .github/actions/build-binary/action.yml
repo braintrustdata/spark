@@ -32,8 +32,8 @@ runs:
         fi
 
     - name: Upload archive
-      # actions/upload-artifact@v4.4.3
-      uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882
+      # actions/upload-artifact@v7.0.1
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: ${{ inputs.artifact }}
         path: dist-sea/${{ inputs.artifact }}.${{ inputs.archive }}
