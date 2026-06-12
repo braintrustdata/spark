@@ -30,4 +30,26 @@ describe("parseArgs", () => {
     expect(options.orgId).toBe("org-123");
     expect(options.projId).toBe("proj-456");
   });
+
+  it("does not reject BRAINTRUST_SETUP_* env vars under strict parsing", async () => {
+    const saved = {
+      BRAINTRUST_SETUP_API_KEY: process.env.BRAINTRUST_SETUP_API_KEY,
+      BRAINTRUST_SETUP_PROJECT_ID: process.env.BRAINTRUST_SETUP_PROJECT_ID,
+      BRAINTRUST_SETUP_YOLO: process.env.BRAINTRUST_SETUP_YOLO,
+    };
+    process.env.BRAINTRUST_SETUP_API_KEY = "sk-test";
+    process.env.BRAINTRUST_SETUP_PROJECT_ID = "proj-123";
+    process.env.BRAINTRUST_SETUP_YOLO = "1";
+    try {
+      const options = await parseArgs([], process.env);
+      expect(options.apiKey).toBe("sk-test");
+      expect(options.projectId).toBe("proj-123");
+      expect(options.yolo).toBe(true);
+    } finally {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    }
+  });
 });

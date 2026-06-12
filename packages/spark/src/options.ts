@@ -40,6 +40,18 @@ function buildParser() {
       type: "string",
       description: "Braintrust project ID to pass to browser sign-in",
     })
+    .option("setup-api-key", {
+      type: "string",
+      hidden: true,
+    })
+    .option("setup-project-id", {
+      type: "string",
+      hidden: true,
+    })
+    .option("setup-yolo", {
+      type: "boolean",
+      hidden: true,
+    })
     .help()
     .alias("h", "help")
     .version(pkg.version)
