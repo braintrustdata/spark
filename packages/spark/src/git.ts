@@ -42,6 +42,25 @@ export async function isGitRepo(cwd: string): Promise<boolean> {
   }
 }
 
+export async function getUncommittedOrUntrackedFiles(
+  cwd: string,
+): Promise<readonly string[]> {
+  try {
+    const { stdout } = await execFileAsync(
+      "git",
+      ["status", "--porcelain=v1", "--untracked-files=normal"],
+      { cwd },
+    );
+    return stdout
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter(Boolean)
+      .map((line) => line.slice(3));
+  } catch {
+    return [];
+  }
+}
+
 const ENV_FILENAME = ".env.braintrust";
 const BRAINTRUST_JSON_FILENAME = ".braintrust.json";
 const GENERATED_FILE_COMMENT =
