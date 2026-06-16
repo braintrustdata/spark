@@ -15,15 +15,14 @@ export type WizardOptions = {
 export const DEFAULT_API_URL = "https://api.braintrust.dev";
 export const DEFAULT_APP_URL = "https://www.braintrust.dev";
 
-function buildParser() {
+function buildParser(env: NodeJS.ProcessEnv) {
   return yargs([])
     .scriptName("braintrust-setup")
     .usage("$0 [options]")
-    .env("BRAINTRUST")
     .option("api-url", {
       type: "string",
       description: "Override API URL",
-      default: DEFAULT_API_URL,
+      default: readEnvString(env, "BRAINTRUST_API_URL") ?? DEFAULT_API_URL,
       hidden: true,
     })
     .option("app-url", {
@@ -35,10 +34,12 @@ function buildParser() {
     .option("org-id", {
       type: "string",
       description: "Braintrust org ID to pass to browser sign-in",
+      default: readEnvString(env, "BRAINTRUST_ORG_ID"),
     })
     .option("proj-id", {
       type: "string",
       description: "Braintrust project ID to pass to browser sign-in",
+      default: readEnvString(env, "BRAINTRUST_PROJ_ID"),
     })
     .option("setup-api-key", {
       type: "string",
@@ -76,7 +77,7 @@ export async function parseArgs(
   argv: readonly string[],
   env: NodeJS.ProcessEnv,
 ): Promise<WizardOptions> {
-  const parser = buildParser();
+  const parser = buildParser(env);
   const parsed = await parser.parseAsync([...argv]);
 
   const apiKey = readEnvString(env, "BRAINTRUST_SETUP_API_KEY");
