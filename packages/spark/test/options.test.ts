@@ -14,11 +14,29 @@ describe("parseArgs", () => {
   });
 
   it("does not treat BRAINTRUST_APP_URL as prompt app URL copy", async () => {
+    const saved = process.env.BRAINTRUST_APP_URL;
+    process.env.BRAINTRUST_APP_URL = "https://app.env/app";
+    try {
+      const options = await parseArgs([], process.env);
+
+      expect(options.appUrl).toBe(DEFAULT_APP_URL);
+      expect(process.env.BRAINTRUST_APP_URL).toBe("https://app.env/app");
+    } finally {
+      if (saved === undefined) delete process.env.BRAINTRUST_APP_URL;
+      else process.env.BRAINTRUST_APP_URL = saved;
+    }
+  });
+
+  it("parses wizard-specific BRAINTRUST env defaults", async () => {
     const options = await parseArgs([], {
-      BRAINTRUST_APP_URL: "https://app.env/",
+      BRAINTRUST_API_URL: "https://api.env/",
+      BRAINTRUST_ORG_ID: "org-env",
+      BRAINTRUST_PROJ_ID: "proj-env",
     });
 
-    expect(options.appUrl).toBe(DEFAULT_APP_URL);
+    expect(options.apiUrl).toBe("https://api.env");
+    expect(options.orgId).toBe("org-env");
+    expect(options.projId).toBe("proj-env");
   });
 
   it("parses browser login org and project id args", async () => {
@@ -31,20 +49,23 @@ describe("parseArgs", () => {
     expect(options.projId).toBe("proj-456");
   });
 
-  it("does not reject BRAINTRUST_SETUP_* env vars under strict parsing", async () => {
+  it("does not reject BRAINTRUST_* env vars under strict parsing", async () => {
     const saved = {
       BRAINTRUST_SETUP_API_KEY: process.env.BRAINTRUST_SETUP_API_KEY,
       BRAINTRUST_SETUP_PROJECT_ID: process.env.BRAINTRUST_SETUP_PROJECT_ID,
       BRAINTRUST_SETUP_YOLO: process.env.BRAINTRUST_SETUP_YOLO,
+      BRAINTRUST_API_KEY: process.env.BRAINTRUST_API_KEY,
     };
     process.env.BRAINTRUST_SETUP_API_KEY = "sk-test";
     process.env.BRAINTRUST_SETUP_PROJECT_ID = "proj-123";
     process.env.BRAINTRUST_SETUP_YOLO = "1";
+    process.env.BRAINTRUST_API_KEY = "sk-ambient";
     try {
       const options = await parseArgs([], process.env);
       expect(options.apiKey).toBe("sk-test");
       expect(options.projectId).toBe("proj-123");
       expect(options.yolo).toBe(true);
+      expect(process.env.BRAINTRUST_API_KEY).toBe("sk-ambient");
     } finally {
       for (const [key, value] of Object.entries(saved)) {
         if (value === undefined) delete process.env[key];
