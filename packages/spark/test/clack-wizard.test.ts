@@ -363,13 +363,13 @@ function buildDeps(
           expect(env["BT_WIZARD_RESULT_FILE"]).toBeDefined();
           expect(env["BT_WIZARD_LANGUAGES"]).toBeUndefined();
           expect(prompt).toContain(
-            "Look at the current workspace and instrument it with Braintrust tracing using the right Braintrust SDK(s).",
+            "Set up Braintrust tracing in this working directory.",
           );
           expect(prompt).toContain(
-            'For the SDK initialization configure the project name "demo".',
+            'Set the project name in the SDK initialization to "demo".',
           );
           expect(prompt).toContain(
-            "Do not run application code, just do code changes to instrument the application.",
+            "Do not run application code, and do not break or meaningfully modify existing code.",
           );
           expect(prompt).toContain("Do not use the Braintrust CLI (`bt`).");
           expect(prompt).not.toContain("Unattended mode (YOLO)");
@@ -1588,10 +1588,10 @@ describe("runClackWizard", () => {
       "taskLog:Running Claude Code to instrument your application:0:false",
     );
     expect(clipboardText).toContain(
-      "Look at the current workspace and instrument it with Braintrust tracing using the right Braintrust SDK(s).",
+      "Set up Braintrust tracing in this working directory.",
     );
     expect(clipboardText).toContain(
-      'For the SDK initialization configure the project name "demo".',
+      'Set the project name in the SDK initialization to "demo".',
     );
     expect(clipboardText).toContain(".env.braintrust");
     expect(clipboardText).toContain(".braintrust.json");
@@ -1619,11 +1619,9 @@ describe("runClackWizard", () => {
         (event) =>
           event.startsWith("writeRaw:") &&
           !event.includes("Braintrust instrumentation prompt:") &&
+          event.includes("https://www.braintrust.dev/docs/llms.txt") &&
           event.includes(
-            "https://www.braintrust.dev/docs/tracing-quickstart",
-          ) &&
-          event.includes(
-            'For the SDK initialization configure the project name "demo".',
+            'Set the project name in the SDK initialization to "demo".',
           ),
       ),
     ).toBe(true);
@@ -1658,7 +1656,7 @@ describe("runClackWizard", () => {
         (event) =>
           event.startsWith("writeRaw:") &&
           !event.includes("Braintrust instrumentation prompt:") &&
-          event.includes("https://www.braintrust.dev/docs/tracing-quickstart"),
+          event.includes("https://www.braintrust.dev/docs/llms.txt"),
       ),
     ).toBe(true);
   });
