@@ -4,24 +4,44 @@ export function renderPrompt(opts: {
   projectName: string;
   appUrl?: string | undefined;
 }): string {
-  let prompt = `Instrument the application in this working directory with Braintrust tracing.
+  const appUrlBullet =
+    opts.appUrl !== DEFAULT_APP_URL
+      ? `\n- Configure the Braintrust SDK initialization with app URL "${opts.appUrl}".`
+      : "";
 
-- Look at the current workspace and instrument it with Braintrust tracing using the right Braintrust SDK(s).
-- Don't add any evals or anything other than tracing.
-- Exclusively follow the docs at https://www.braintrust.dev/docs/tracing-quickstart. Do not concern yourself with the braintrust setup script. You are running as part of that script.
-- You can assume that there are \`.env.braintrust\` and \`.braintrust.json\` files at the current working directory. These files contain a \`BRAINTRUST_API_KEY\` token with a valid API key for the Braintrust organization we want to send data to. Assume that the Braintrust SDKs are able to pick up the local token automatically as long as they run with a working directory in a directory below or with these files. Don't read either file and never put the actual API key value into code.
-- In terms of instrumentation, always prefer adding auto-instrumentation over manual wrappers.
-- For the SDK initialization configure the project name "${opts.projectName || ""}".
-- Do not run application code, just do code changes to instrument the application.
-- Also install the SDK or multiple SDKs if necessary. Always use the latest version. Do web research or web requests to look up the latest version and install that version - don't just pin to e.g. \`latest\`. Make sure to use the right package manager that the project is already using. Also look upwards in the directory structure to check whether you're in a mono-repo or not. Ideally go to the root of the git repository if present to verify, but only instrument applications in or below the current working directory. Verify that the SDK has actually been installed.
+  return `Set up Braintrust tracing in this working directory. Follow these steps in order.
+
+You are running as part of the Braintrust setup script, so don't concern yourself with that script. There are \`.env.braintrust\` and \`.braintrust.json\` files in the current working directory that hold a valid \`BRAINTRUST_API_KEY\` for the target organization. The Braintrust SDKs pick up this token automatically as long as they run with a working directory at or below these files. Don't read either file, and never put the actual API key value into code.
+
+## Step 1: Detect the SDK
+
+Look at the workspace and determine the right Braintrust SDK(s) to use. If the project spans more than one language, instrument each one. If the project is a monorepo, check the git root to get oriented, but only instrument applications in or below the current working directory.
+
+## Step 2: Follow the SDK's configure tracing guide
+
+For each SDK, read the matching page and follow its "Configure tracing" section. Do not follow any other Braintrust setup docs.
+
+| SDK | Guide |
+| --- | ------|
+| Python | https://www.braintrust.dev/docs/sdks/python/install-and-instrument.md |
+| TypeScript | https://www.braintrust.dev/docs/sdks/typescript/install-and-instrument.md |
+| Go | https://www.braintrust.dev/docs/sdks/go/install-and-instrument.md |
+| Java | https://www.braintrust.dev/docs/sdks/java/install-and-instrument.md |
+| Ruby | https://www.braintrust.dev/docs/sdks/ruby/install-and-instrument.md |
+| C# | https://www.braintrust.dev/docs/sdks/csharp/install-and-instrument.md |
+
+## Step 3: Install and configure the SDK
+
+- Install the SDK with the package manager the project already uses. Use the latest version: do web research to look it up and install that version rather than pinning to \`latest\`. Verify the install succeeded.
+- Prefer auto-instrumentation over manual wrappers.
+- Set the project name in the SDK initialization to "${opts.projectName || ""}".${appUrlBullet}
+
+## Rules
+
+- Add only tracing. Do not add evals or anything else.
+- Make only the code changes needed to add tracing. Do not run application code, and do not break or meaningfully modify existing code.
 - Be as concise and readable as possible with your code changes.
-- Do not break any application code. 
-- Do not modify any application code in any meaningful way.
-- Do not use the Braintrust CLI (\`bt\`).`;
+- Do not use the Braintrust CLI (\`bt\`).
 
-  if (opts.appUrl !== DEFAULT_APP_URL) {
-    prompt += `\n- Configure the Braintrust SDK initialization with app URL "${opts.appUrl}".`;
-  }
-
-  return prompt;
+Full documentation: https://www.braintrust.dev/docs/llms.txt`;
 }
