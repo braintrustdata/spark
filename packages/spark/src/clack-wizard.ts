@@ -6,8 +6,10 @@ import clipboard from "clipboardy";
 import pc from "picocolors";
 
 import {
+  createWizardSession,
   loginWithWizardSession as loginWithWizardSessionRequest,
   type WizardSessionCompleteResult,
+  type WizardSessionCreateResponse,
   type WizardSessionLoginUrlParams,
   type WizardSessionLogin,
 } from "./auth";
@@ -40,6 +42,12 @@ import { allocateResultFile, readResultFile } from "./instrument";
 import type { WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
 import { ClackToolRenderer } from "./tool-ui";
+import {
+  buildCliSetupClientContext,
+  createWizardEvents,
+  type CliSetupFailureCategory,
+  type WizardEventsRuntime,
+} from "./events";
 
 const COPY = CLACK_WIZARD_COPY;
 const WIZARD_CANCEL_MESSAGE = COPY.shared.cancelMessage;
@@ -67,8 +75,19 @@ type InstrumentationModeChoice =
 type OwnAgentPromptDelivery = "clipboard" | "terminal";
 
 type BraintrustCliBackgroundTask = {
-  readonly wait: (spinner: WizardStepSpinner) => Promise<void>;
+  readonly wait: (
+    spinner: WizardStepSpinner,
+  ) => Promise<"completed" | "failed">;
 };
+
+type BraintrustCliSetupResult =
+  | {
+      readonly outcome: "skipped" | "failed";
+    }
+  | {
+      readonly outcome: "pending";
+      readonly backgroundTask: BraintrustCliBackgroundTask;
+    };
 
 function createBraintrustCliBackgroundTask(
   task: Promise<unknown>,
@@ -88,7 +107,9 @@ function createBraintrustCliBackgroundTask(
             summarizeBraintrustCliError(error),
           ),
         );
+        return "failed";
       }
+      return "completed";
     },
   };
 }
@@ -151,6 +172,7 @@ export type WizardDeps = {
   readonly writeClipboard: (text: string) => Promise<void>;
   readonly braintrustCli: BraintrustCliRuntime;
   readonly codingTools: CodingToolRuntime;
+  readonly setupEvents: WizardEventsRuntime;
 };
 
 export type CodingToolRuntime = {
@@ -169,7 +191,7 @@ export type CodingToolRuntime = {
 };
 
 export class WizardCancelledError extends Error {
-  constructor() {
+  constructor(readonly failureCategory: CliSetupFailureCategory = "cancelled") {
     super(WIZARD_CANCEL_MESSAGE);
     this.name = "WizardCancelledError";
   }
@@ -220,6 +242,31 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
   process.stdout.write("\n");
   clack.intro(COPY.welcome.intro);
 
+  const events = deps.setupEvents;
+  const wizardSession = events.start();
+  try {
+    const result = await runClackWizardFlow(deps, events, wizardSession);
+    await events.terminate({ outcome: "completed" });
+    return result;
+  } catch (error) {
+    const cancelled = error instanceof WizardCancelledError;
+    await events.terminate({
+      outcome: cancelled ? "cancelled" : "failed",
+      ...(cancelled ? { failureCategory: error.failureCategory } : {}),
+    });
+    throw error;
+  }
+}
+
+async function runClackWizardFlow(
+  deps: WizardDeps,
+  events: WizardEventsRuntime,
+  wizardSession: Promise<WizardSessionCreateResponse | undefined>,
+): Promise<WizardResult> {
+  const repositoryStep = events.startStep("repository_check", {
+    failureCategory: "repository_state",
+  });
+
   const inGitRepo = await isGitRepo(deps.cwd);
   if (!inGitRepo) {
     const continueOutsideGit = await selectBoolean({
@@ -228,8 +275,11 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
       yesFirst: false,
     });
     if (!continueOutsideGit) {
+      events.finishStep(repositoryStep, "cancelled", {
+        failureCategory: "repository_state",
+      });
       clack.cancel(WIZARD_CANCEL_MESSAGE);
-      throw new WizardCancelledError();
+      throw new WizardCancelledError("repository_state");
     }
   } else {
     const dirtyFiles = await getUncommittedOrUntrackedFiles(deps.cwd);
@@ -240,17 +290,25 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
         yesFirst: false,
       });
       if (!continueWithDirtyRepo) {
+        events.finishStep(repositoryStep, "cancelled", {
+          failureCategory: "repository_state",
+        });
         clack.cancel(WIZARD_CANCEL_MESSAGE);
-        throw new WizardCancelledError();
+        throw new WizardCancelledError("repository_state");
       }
     }
   }
+  events.finishStep(repositoryStep, "completed");
 
+  const authenticationStep = events.startStep("authentication", {
+    failureCategory: "auth",
+  });
   let session: WizardSessionCompleteResult;
   if (
     deps.options.apiKey !== undefined &&
     deps.options.projectId !== undefined
   ) {
+    events.setAuthMode("ci");
     session = await loginWithCiCredentials({
       apiKey: deps.options.apiKey,
       projectId: deps.options.projectId,
@@ -263,21 +321,53 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
         : (await hasBraintrustAccount())
           ? "signin"
           : "signup";
-    session = await loginWithBrowser(deps, { authMode });
+    events.setAuthMode(authMode);
+    session = await loginWithBrowser(deps, {
+      authMode,
+      wizardSession: await wizardSession,
+    });
   }
+  events.finishStep(authenticationStep, "completed");
 
+  const credentialsStep = events.startStep("credentials_write", {
+    failureCategory: "filesystem",
+  });
   await writeLocalEnvBraintrust(deps, session.apiKey);
+  events.finishStep(credentialsStep, "completed");
 
   const setupSpinner = new WizardStepSpinner();
   let codingToolStatuses: readonly CodingToolStatus[];
-  let braintrustCliBackgroundTask: BraintrustCliBackgroundTask | undefined;
+  const braintrustCliStep = events.startStep("bt_cli_setup", {
+    failureCategory: "bt_cli",
+  });
+  let braintrustCliSetup: BraintrustCliSetupResult;
   try {
-    braintrustCliBackgroundTask = await handleBraintrustCliSetup(
+    braintrustCliSetup = await handleBraintrustCliSetup(
       deps,
       session,
       setupSpinner,
     );
+    if (braintrustCliSetup.outcome !== "pending") {
+      events.finishStep(braintrustCliStep, braintrustCliSetup.outcome, {
+        ...(braintrustCliSetup.outcome === "failed"
+          ? { failureCategory: "bt_cli" as const }
+          : {}),
+      });
+    }
+    const codingToolPreflightStep = events.startStep("coding_tool_preflight", {
+      failureCategory: "coding_tool_unavailable",
+    });
     codingToolStatuses = await preflightCodingTools(deps, setupSpinner);
+    const hasUsableCodingTool = codingToolStatuses.some(
+      (status) => status.usable,
+    );
+    events.finishStep(
+      codingToolPreflightStep,
+      hasUsableCodingTool ? "completed" : "failed",
+      hasUsableCodingTool
+        ? undefined
+        : { failureCategory: "coding_tool_unavailable" },
+    );
   } finally {
     setupSpinner.clear();
   }
@@ -288,15 +378,34 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     warnNoUsableCodingTools(codingToolStatuses);
   }
 
+  const instrumentationSelectionStep = events.startStep(
+    "instrumentation_selection",
+  );
   let instrumentationMode: InstrumentationModeChoice | undefined =
     await selectInstrumentationMode({
       includeBuiltIn: hasUsableCodingTool,
     });
-  await braintrustCliBackgroundTask?.wait(setupSpinner);
+  events.setInstrumentation({
+    mode: eventInstrumentationMode(instrumentationMode),
+  });
+  events.finishStep(instrumentationSelectionStep, "completed");
+  if (braintrustCliSetup.outcome === "pending") {
+    const outcome = await braintrustCliSetup.backgroundTask.wait(setupSpinner);
+    events.finishStep(braintrustCliStep, outcome, {
+      ...(outcome === "failed" ? { failureCategory: "bt_cli" as const } : {}),
+    });
+  }
   setupSpinner.clear();
 
   if (instrumentationMode.id === "built-in") {
     const instrumentation = await selectBuiltInCodingTool(codingToolStatuses);
+    events.setInstrumentation({
+      mode: "built_in",
+      codingTool: instrumentation.id,
+    });
+    const instrumentationRunStep = events.startStep("instrumentation_run", {
+      failureCategory: "coding_tool_failed",
+    });
     const proceed = unwrap(
       await clack.select<"proceed" | "abort">({
         message: COPY.instrumentation.builtIn.proceedQuestion,
@@ -316,33 +425,58 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     );
 
     if (proceed === "proceed") {
-      await runInstrumentation(deps, {
+      const result = await runInstrumentation(deps, {
         org: session.orgName,
         project: session.projectName,
         apiKey: session.apiKey,
         toolId: instrumentation.id,
       });
+      events.finishStep(instrumentationRunStep, result.outcome, {
+        ...(result.outcome === "failed"
+          ? { failureCategory: "coding_tool_failed" as const }
+          : {}),
+      });
       instrumentationMode = undefined;
     } else {
+      events.finishStep(instrumentationRunStep, "cancelled", {
+        failureCategory: "cancelled",
+      });
+      const alternateSelectionStep = events.startStep(
+        "instrumentation_selection",
+      );
       instrumentationMode = await selectInstrumentationMode({
         includeBuiltIn: false,
       });
+      events.setInstrumentation({
+        mode: eventInstrumentationMode(instrumentationMode),
+      });
+      events.finishStep(alternateSelectionStep, "completed");
     }
   }
 
   if (instrumentationMode?.id === "own-agent") {
+    const instrumentationRunStep = events.startStep("instrumentation_run");
     await handleOwnAgentInstrumentation(deps, {
       org: session.orgName,
       project: session.projectName,
     });
+    events.finishStep(instrumentationRunStep, "completed");
   } else if (instrumentationMode?.id === "manual") {
+    const instrumentationRunStep = events.startStep("instrumentation_run");
     await confirmManualInstrumentation();
+    events.finishStep(instrumentationRunStep, "completed");
   }
 
   const projectLogsUrl = `${deps.options.appUrl}/app/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
+  const traceVerificationStep = events.startStep("trace_verification", {
+    failureCategory: "trace_not_observed",
+  });
   await confirmTraceLogs(projectLogsUrl);
+  events.finishStep(traceVerificationStep, "completed");
 
+  const productionSetupStep = events.startStep("production_setup");
   await confirmProductionApiKey();
+  events.finishStep(productionSetupStep, "completed");
 
   clack.outro(COPY.outro.complete);
 
@@ -357,6 +491,7 @@ async function loginWithBrowser(
   deps: WizardDeps,
   args: {
     readonly authMode: WizardSessionLoginUrlParams["authMode"];
+    readonly wizardSession: WizardSessionCreateResponse | undefined;
   },
 ): Promise<WizardSessionCompleteResult> {
   const spinner = clack.spinner();
@@ -364,6 +499,7 @@ async function loginWithBrowser(
 
   try {
     const session = await deps.loginWithWizardSession({
+      session: args.wizardSession,
       loginUrlParams: {
         orgId: deps.options.orgId,
         projectId: deps.options.projId,
@@ -439,11 +575,24 @@ async function selectInstrumentationMode(args: {
   );
 }
 
+function eventInstrumentationMode(
+  choice: InstrumentationModeChoice,
+): "built_in" | "own_agent" | "manual" {
+  switch (choice.id) {
+    case "built-in":
+      return "built_in";
+    case "own-agent":
+      return "own_agent";
+    case "manual":
+      return "manual";
+  }
+}
+
 async function handleBraintrustCliSetup(
   deps: WizardDeps,
   session: WizardSessionCompleteResult,
   spinner: WizardStepSpinner,
-): Promise<BraintrustCliBackgroundTask | undefined> {
+): Promise<BraintrustCliSetupResult> {
   let discovery = await deps.braintrustCli.discover();
   let commandPath = discovery.commandPath;
 
@@ -486,7 +635,7 @@ async function handleBraintrustCliSetup(
       choices: COPY.braintrustCli.installChoices,
       yesFirst: true,
     });
-    if (!shouldInstall) return undefined;
+    if (!shouldInstall) return { outcome: "skipped" };
 
     spinner.update(COPY.braintrustCli.installing);
     try {
@@ -496,7 +645,7 @@ async function handleBraintrustCliSetup(
       clack.log.warn(
         COPY.braintrustCli.installFailed(summarizeBraintrustCliError(error)),
       );
-      return undefined;
+      return { outcome: "failed" };
     }
 
     discovery = await deps.braintrustCli.discover();
@@ -504,11 +653,11 @@ async function handleBraintrustCliSetup(
     if (!discovery.installed || !commandPath) {
       spinner.clear();
       clack.log.warn(COPY.braintrustCli.installedButNotFound);
-      return undefined;
+      return { outcome: "failed" };
     }
   }
 
-  if (!commandPath) return undefined;
+  if (!commandPath) return { outcome: "skipped" };
 
   let currentContext: BraintrustCliContext;
   spinner.update(COPY.braintrustCli.checkingContext);
@@ -516,7 +665,7 @@ async function handleBraintrustCliSetup(
     currentContext = await deps.braintrustCli.status(commandPath);
   } catch {
     spinner.clear();
-    return undefined;
+    return { outcome: "failed" };
   }
 
   const targetContext = {
@@ -535,10 +684,26 @@ async function handleBraintrustCliSetup(
       yesFirst: true,
     });
     if (!shouldSwitch) {
-      return undefined;
+      return { outcome: "skipped" };
     }
 
-    return createBraintrustCliBackgroundTask(
+    return {
+      outcome: "pending",
+      backgroundTask: createBraintrustCliBackgroundTask(
+        deps.braintrustCli.loginAndSwitch(commandPath, {
+          apiKey: session.apiKey,
+          apiUrl: deps.options.apiUrl,
+          appUrl: deps.options.appUrl,
+          orgName: session.orgName,
+          projectName: session.projectName,
+        }),
+      ),
+    };
+  }
+
+  return {
+    outcome: "pending",
+    backgroundTask: createBraintrustCliBackgroundTask(
       deps.braintrustCli.loginAndSwitch(commandPath, {
         apiKey: session.apiKey,
         apiUrl: deps.options.apiUrl,
@@ -546,18 +711,8 @@ async function handleBraintrustCliSetup(
         orgName: session.orgName,
         projectName: session.projectName,
       }),
-    );
-  }
-
-  return createBraintrustCliBackgroundTask(
-    deps.braintrustCli.loginAndSwitch(commandPath, {
-      apiKey: session.apiKey,
-      apiUrl: deps.options.apiUrl,
-      appUrl: deps.options.appUrl,
-      orgName: session.orgName,
-      projectName: session.projectName,
-    }),
-  );
+    ),
+  };
 }
 
 function braintrustCliContextConflicts(
@@ -771,6 +926,7 @@ async function confirmProductionApiKey(): Promise<void> {
 
 type InstrumentationResult = {
   readonly tracePermalink: string | undefined;
+  readonly outcome: "completed" | "failed";
 };
 
 async function runInstrumentation(
@@ -835,6 +991,11 @@ async function runInstrumentation(
   }
 
   return {
+    outcome:
+      toolResult.exitCode !== 0 ||
+      toolResult.finalText.includes("INSTRUMENTATION_INCOMPLETE")
+        ? "failed"
+        : "completed",
     tracePermalink:
       readResultFile(resultFilePath) ??
       extractTracePermalink(toolResult.finalText),
@@ -867,6 +1028,7 @@ async function loginWithCiCredentials(args: {
 export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
   const cwd = args.cwd ?? processCwd();
   const env = args.env ?? process.env;
+  const clientContext = buildCliSetupClientContext(args.options);
   return {
     cwd,
     env,
@@ -874,6 +1036,7 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
     loginWithWizardSession: (loginArgs) =>
       loginWithWizardSessionRequest({
         appUrl: args.options.appUrl,
+        session: loginArgs.session,
         loginUrlParams: {
           orgId: loginArgs.loginUrlParams?.orgId ?? args.options.orgId,
           projectId: loginArgs.loginUrlParams?.projectId ?? args.options.projId,
@@ -881,6 +1044,12 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
         },
         events: loginArgs.events,
       }),
+    setupEvents: createWizardEvents({
+      appUrl: args.options.appUrl,
+      clientContext,
+      createSession: (context, signal) =>
+        createWizardSession(args.options.appUrl, context, signal),
+    }),
     openBrowser,
     writeClipboard: (text) => clipboard.write(text),
     braintrustCli: createBraintrustCliRuntime({ env }),

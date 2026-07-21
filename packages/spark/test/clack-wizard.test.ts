@@ -29,6 +29,7 @@ import {
   WizardCancelledError,
   type WizardDeps,
 } from "../src/clack-wizard";
+import type { WizardEventStep, WizardEventsRuntime } from "../src/events";
 
 const clackMock = vi.hoisted(() => ({
   cancelSymbol: Symbol("cancel"),
@@ -304,6 +305,7 @@ function buildDeps(
     readonly braintrustCli?: BraintrustCliRuntime;
     readonly writeClipboard?: (text: string) => Promise<void>;
     readonly options?: Partial<WizardDeps["options"]>;
+    readonly setupEvents?: WizardEventsRuntime;
   } = {},
 ): WizardDeps {
   const cwd = args.cwd ?? createGitTempDir();
@@ -396,7 +398,46 @@ function buildDeps(
           });
         },
       } satisfies CodingToolRuntime),
+    setupEvents: args.setupEvents ?? createEventsRecorder().runtime,
   };
+}
+
+function createEventsRecorder() {
+  const events: string[] = [];
+  let stepId = 0;
+  const runtime: WizardEventsRuntime = {
+    start: () => {
+      events.push("start");
+      return Promise.resolve({
+        session_token: "session-token",
+        poll_token: "poll-token",
+        event_token: "event-token",
+        expires_at: "2099-01-01T00:00:00.000Z",
+        login_path: "/app/cli-login?session_token=session-token",
+        verification_code: "123456",
+      });
+    },
+    setAuthMode: (mode) => events.push(`auth:${mode}`),
+    setInstrumentation: ({ mode, codingTool }) =>
+      events.push(`instrumentation:${mode}:${codingTool ?? ""}`),
+    startStep: (name) => {
+      const step = { id: String(++stepId), name };
+      events.push(`step.start:${name}`);
+      return step;
+    },
+    finishStep: (step: WizardEventStep, outcome, finishArgs) => {
+      events.push(
+        `step.finish:${step.name}:${outcome}:${finishArgs?.failureCategory ?? ""}`,
+      );
+    },
+    terminate: (termination) => {
+      events.push(
+        `terminate:${termination.outcome}:${termination.failureCategory ?? ""}`,
+      );
+      return Promise.resolve();
+    },
+  };
+  return { events, runtime };
 }
 
 function createBraintrustCliStub(
@@ -434,6 +475,115 @@ function createBraintrustCliStub(
 }
 
 describe("runClackWizard", () => {
+  it("tracks the complete manual setup lifecycle and reuses the early session", async () => {
+    const { events, runtime } = createEventsRecorder();
+    createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "checked", "confirmed"],
+    });
+    let receivedSessionToken: string | undefined;
+    const deps = buildDeps({
+      setupEvents: runtime,
+      loginWithWizardSession: async ({ events, session }) => {
+        receivedSessionToken = session?.session_token;
+        events.onLoginUrl({
+          loginUrl: "https://app.test/app/cli-login?session_token=test",
+          expiresAt: "2099-01-01T00:00:00.000Z",
+          verificationCode: "123456",
+        });
+        await events.onTryOpenBrowser(
+          "https://app.test/app/cli-login?session_token=test",
+        );
+        return DEFAULT_LOGIN_RESULT;
+      },
+    });
+
+    await runClackWizard(deps);
+
+    expect(receivedSessionToken).toBe("session-token");
+    expect(events).toEqual([
+      "start",
+      "step.start:repository_check",
+      "step.finish:repository_check:completed:",
+      "step.start:authentication",
+      "auth:signin",
+      "step.finish:authentication:completed:",
+      "step.start:credentials_write",
+      "step.finish:credentials_write:completed:",
+      "step.start:bt_cli_setup",
+      "step.finish:bt_cli_setup:skipped:",
+      "step.start:coding_tool_preflight",
+      "step.finish:coding_tool_preflight:completed:",
+      "step.start:instrumentation_selection",
+      "instrumentation:manual:",
+      "step.finish:instrumentation_selection:completed:",
+      "step.start:instrumentation_run",
+      "step.finish:instrumentation_run:completed:",
+      "step.start:trace_verification",
+      "step.finish:trace_verification:completed:",
+      "step.start:production_setup",
+      "step.finish:production_setup:completed:",
+      "terminate:completed:",
+    ]);
+  });
+
+  it("tracks repository-state cancellation", async () => {
+    const cwd = createGitTempDir();
+    writeFileSync(join(cwd, "existing-work.ts"), "changed\n");
+    createPrompts({ selects: ["no"] });
+    const { events, runtime } = createEventsRecorder();
+
+    await expect(
+      runClackWizard(buildDeps({ cwd, setupEvents: runtime })),
+    ).rejects.toThrow(WizardCancelledError);
+
+    expect(events).toEqual([
+      "start",
+      "step.start:repository_check",
+      "step.finish:repository_check:cancelled:repository_state",
+      "terminate:cancelled:repository_state",
+    ]);
+  });
+
+  it("tracks CI credential setup without browser authentication", async () => {
+    createPrompts({
+      selects: ["no", "manual", "confirm", "checked", "confirmed"],
+    });
+    const { events, runtime } = createEventsRecorder();
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ id: "project-id", name: "demo", org_id: "org-id" }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ id: "org-id", name: "acme" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    try {
+      const deps = buildDeps({
+        setupEvents: runtime,
+        options: {
+          apiKey: "secret",
+          projectId: "project-id",
+        },
+        loginWithWizardSession: () =>
+          Promise.reject(new Error("browser login should not run")),
+      });
+
+      await runClackWizard(deps);
+    } finally {
+      fetchSpy.mockRestore();
+    }
+
+    expect(events).toContain("auth:ci");
+    expect(events).toContain("step.finish:authentication:completed:");
+    expect(events.at(-1)).toBe("terminate:completed:");
+  });
+
   it("walks through the happy path with one usable coding tool", async () => {
     const { events } = createPrompts({
       selects: ["yes", "no", "first", "proceed", "checked", "confirmed"],

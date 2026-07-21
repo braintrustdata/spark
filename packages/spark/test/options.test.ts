@@ -64,6 +64,15 @@ describe("parseArgs", () => {
     expect(options.orgId).toBe("org-123");
   });
 
+  it("parses the hidden setup attribution source", async () => {
+    const options = await parseArgs(
+      ["--from", "docs_typescript_quickstart"],
+      {},
+    );
+
+    expect(options.from).toBe("docs_typescript_quickstart");
+  });
+
   it("does not reject unrelated BRAINTRUST_* env vars", async () => {
     const saved = {
       BRAINTRUST_SETUP_API_KEY: process.env.BRAINTRUST_SETUP_API_KEY,
