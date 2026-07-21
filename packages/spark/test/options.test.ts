@@ -49,7 +49,22 @@ describe("parseArgs", () => {
     expect(options.projId).toBe("proj-456");
   });
 
-  it("does not reject BRAINTRUST_* env vars under strict parsing", async () => {
+  it("ignores additional arguments", async () => {
+    const options = await parseArgs(
+      [
+        "extra-positional",
+        "--unknown-flag",
+        "unknown-value",
+        "--org-id",
+        "org-123",
+      ],
+      {},
+    );
+
+    expect(options.orgId).toBe("org-123");
+  });
+
+  it("does not reject unrelated BRAINTRUST_* env vars", async () => {
     const saved = {
       BRAINTRUST_SETUP_API_KEY: process.env.BRAINTRUST_SETUP_API_KEY,
       BRAINTRUST_SETUP_PROJECT_ID: process.env.BRAINTRUST_SETUP_PROJECT_ID,

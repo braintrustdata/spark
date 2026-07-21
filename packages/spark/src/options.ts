@@ -56,7 +56,7 @@ function buildParser(env: NodeJS.ProcessEnv) {
     .help()
     .alias("h", "help")
     .version(pkg.version)
-    .strict();
+    .strict(false);
 }
 
 function readEnvString(
