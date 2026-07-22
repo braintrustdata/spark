@@ -19,6 +19,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },
+  "pnpm": {
+    "overrides": {
+      "vite@>=8.0.0 <=8.0.15": "8.0.16"
+    }
+  },
   "devDependencies": {
     "prettier": "3.8.3",
     "turbo": "^2.9.14"
