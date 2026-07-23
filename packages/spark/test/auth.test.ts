@@ -79,7 +79,6 @@ describe("createWizardSession", () => {
       cliVersion: "1.2.3",
       platform: "linux",
       architecture: "x64",
-      distribution: "standalone" as const,
       entryPoint: "docs",
       docsPage: "typescript_quickstart",
       authMode: "signin",

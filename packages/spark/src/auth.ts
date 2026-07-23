@@ -11,10 +11,10 @@ export type WizardSessionCreateClientContext = {
   readonly cliVersion: string;
   readonly platform: string;
   readonly architecture: string;
-  readonly distribution: "standalone" | "node";
   readonly entryPoint:
     | "homepage"
     | "in_app_onboarding"
+    | "in_app_setup"
     | "docs"
     | "direct"
     | "ci";

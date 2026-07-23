@@ -502,8 +502,6 @@ describe("runClackWizard", () => {
     expect(receivedSessionToken).toBe("session-token");
     expect(events).toEqual([
       "start",
-      "step.start:repository_check",
-      "step.finish:repository_check:completed:",
       "step.start:authentication",
       "auth:signin",
       "step.finish:authentication:completed:",
@@ -536,12 +534,7 @@ describe("runClackWizard", () => {
       runClackWizard(buildDeps({ cwd, setupEvents: runtime })),
     ).rejects.toThrow(WizardCancelledError);
 
-    expect(events).toEqual([
-      "start",
-      "step.start:repository_check",
-      "step.finish:repository_check:cancelled:repository_state",
-      "terminate:cancelled:repository_state",
-    ]);
+    expect(events).toEqual(["start", "terminate:cancelled:repository_state"]);
   });
 
   it("tracks CI credential setup without browser authentication", async () => {

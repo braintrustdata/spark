@@ -263,10 +263,6 @@ async function runClackWizardFlow(
   events: WizardEventsRuntime,
   wizardSession: Promise<WizardSessionCreateResponse | undefined>,
 ): Promise<WizardResult> {
-  const repositoryStep = events.startStep("repository_check", {
-    failureCategory: "repository_state",
-  });
-
   const inGitRepo = await isGitRepo(deps.cwd);
   if (!inGitRepo) {
     const continueOutsideGit = await selectBoolean({
@@ -275,9 +271,6 @@ async function runClackWizardFlow(
       yesFirst: false,
     });
     if (!continueOutsideGit) {
-      events.finishStep(repositoryStep, "cancelled", {
-        failureCategory: "repository_state",
-      });
       clack.cancel(WIZARD_CANCEL_MESSAGE);
       throw new WizardCancelledError("repository_state");
     }
@@ -290,16 +283,11 @@ async function runClackWizardFlow(
         yesFirst: false,
       });
       if (!continueWithDirtyRepo) {
-        events.finishStep(repositoryStep, "cancelled", {
-          failureCategory: "repository_state",
-        });
         clack.cancel(WIZARD_CANCEL_MESSAGE);
         throw new WizardCancelledError("repository_state");
       }
     }
   }
-  events.finishStep(repositoryStep, "completed");
-
   const authenticationStep = events.startStep("authentication", {
     failureCategory: "auth",
   });

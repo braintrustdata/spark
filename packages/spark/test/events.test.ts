@@ -21,7 +21,6 @@ const CONTEXT: CliSetupClientContext = {
   cliVersion: "1.2.3",
   platform: "linux",
   architecture: "x64",
-  distribution: "standalone",
   entryPoint: "direct",
 };
 
@@ -29,6 +28,7 @@ describe("setupAttribution", () => {
   it.each([
     ["homepage", { entryPoint: "homepage" }],
     ["in_app_onboarding", { entryPoint: "in_app_onboarding" }],
+    ["in_app_setup", { entryPoint: "in_app_setup" }],
     [
       "docs_tracing_quickstart",
       { entryPoint: "docs", docsPage: "tracing_quickstart" },
@@ -85,7 +85,6 @@ describe("setupAttribution", () => {
     expect(context.cliVersion).toMatch(/^\d+\.\d+\.\d+$/);
     expect(context.platform).toBe(process.platform);
     expect(context.architecture).toBe(process.arch);
-    expect(["standalone", "node"]).toContain(context.distribution);
   });
 });
 
@@ -96,7 +95,6 @@ describe("createWizardEvents", () => {
       .mockResolvedValue(new Response(null, { status: 204 }));
     const createSession = vi.fn().mockResolvedValue(SESSION);
     let monotonicTime = 10;
-    let messageId = 0;
     const events = createWizardEvents({
       appUrl: "https://app.test",
       clientContext: CONTEXT,
@@ -104,16 +102,14 @@ describe("createWizardEvents", () => {
       fetch: fetchMock,
       now: () => new Date("2026-07-21T12:00:00.000Z"),
       monotonicNow: () => monotonicTime,
-      createMessageId: () =>
-        `00000000-0000-4000-8000-${String(++messageId).padStart(12, "0")}`,
     });
 
     const session = events.start();
-    const repositoryStep = events.startStep("repository_check", {
-      failureCategory: "repository_state",
+    const authenticationStep = events.startStep("authentication", {
+      failureCategory: "auth",
     });
     monotonicTime = 35;
-    events.finishStep(repositoryStep, "completed");
+    events.finishStep(authenticationStep, "completed");
     events.setAuthMode("signin");
     events.setInstrumentation({ mode: "built_in", codingTool: "codex" });
     const instrumentationStep = events.startStep("instrumentation_run", {
@@ -145,10 +141,11 @@ describe("createWizardEvents", () => {
       };
     });
     expect(requests[1]?.properties).toMatchObject({
-      step: "repository_check",
+      step: "authentication",
       outcome: "completed",
       durationMs: 25,
     });
+    expect(requests.every((request) => !("messageId" in request))).toBe(true);
     expect(requests[3]?.properties).toMatchObject({
       step: "instrumentation_run",
       outcome: "failed",
@@ -179,7 +176,7 @@ describe("createWizardEvents", () => {
       fetch: fetchMock,
     });
 
-    const step = events.startStep("repository_check");
+    const step = events.startStep("authentication");
     events.finishStep(step, "completed");
     await events.terminate({ outcome: "completed" });
 
