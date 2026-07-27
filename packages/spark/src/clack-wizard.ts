@@ -373,10 +373,13 @@ async function runClackWizardFlow(
     await selectInstrumentationMode({
       includeBuiltIn: hasUsableCodingTool,
     });
-  events.setInstrumentation({
+  const selectedInstrumentation = {
     mode: eventInstrumentationMode(instrumentationMode),
+  };
+  events.setInstrumentation(selectedInstrumentation);
+  events.finishStep(instrumentationSelectionStep, "completed", {
+    instrumentation: selectedInstrumentation,
   });
-  events.finishStep(instrumentationSelectionStep, "completed");
   if (braintrustCliSetup.outcome === "pending") {
     const outcome = await braintrustCliSetup.backgroundTask.wait(setupSpinner);
     events.finishStep(braintrustCliStep, outcome, {
@@ -391,9 +394,9 @@ async function runClackWizardFlow(
       mode: "built_in",
       codingTool: instrumentation.id,
     });
-    const instrumentationRunStep = events.startStep("instrumentation_run", {
-      failureCategory: "coding_tool_failed",
-    });
+    const codingToolConfirmationStep = events.startStep(
+      "coding_tool_confirmation",
+    );
     const proceed = unwrap(
       await clack.select<"proceed" | "abort">({
         message: COPY.instrumentation.builtIn.proceedQuestion,
@@ -413,6 +416,10 @@ async function runClackWizardFlow(
     );
 
     if (proceed === "proceed") {
+      events.finishStep(codingToolConfirmationStep, "completed");
+      const instrumentationRunStep = events.startStep("instrumentation_run", {
+        failureCategory: "coding_tool_failed",
+      });
       const result = await runInstrumentation(deps, {
         org: session.orgName,
         project: session.projectName,
@@ -426,19 +433,20 @@ async function runClackWizardFlow(
       });
       instrumentationMode = undefined;
     } else {
-      events.finishStep(instrumentationRunStep, "cancelled", {
-        failureCategory: "cancelled",
-      });
+      events.finishStep(codingToolConfirmationStep, "skipped");
       const alternateSelectionStep = events.startStep(
         "instrumentation_selection",
       );
       instrumentationMode = await selectInstrumentationMode({
         includeBuiltIn: false,
       });
-      events.setInstrumentation({
+      const alternateInstrumentation = {
         mode: eventInstrumentationMode(instrumentationMode),
+      };
+      events.setInstrumentation(alternateInstrumentation);
+      events.finishStep(alternateSelectionStep, "completed", {
+        instrumentation: alternateInstrumentation,
       });
-      events.finishStep(alternateSelectionStep, "completed");
     }
   }
 

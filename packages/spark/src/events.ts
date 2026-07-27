@@ -28,6 +28,7 @@ export type CliSetupStepName =
   | "bt_cli_setup"
   | "coding_tool_preflight"
   | "instrumentation_selection"
+  | "coding_tool_confirmation"
   | "instrumentation_run"
   | "trace_verification"
   | "production_setup";
@@ -67,13 +68,15 @@ export type WizardEventStep = {
   readonly name: CliSetupStepName;
 };
 
+export type WizardEventInstrumentation = {
+  readonly mode: CliSetupInstrumentationMode;
+  readonly codingTool?: string | undefined;
+};
+
 export type WizardEventsRuntime = {
   readonly start: () => Promise<WizardSessionCreateResponse | undefined>;
   readonly setAuthMode: (authMode: CliSetupAuthMode) => void;
-  readonly setInstrumentation: (args: {
-    readonly mode: CliSetupInstrumentationMode;
-    readonly codingTool?: string | undefined;
-  }) => void;
+  readonly setInstrumentation: (args: WizardEventInstrumentation) => void;
   readonly startStep: (
     name: CliSetupStepName,
     args?: {
@@ -85,6 +88,7 @@ export type WizardEventsRuntime = {
     outcome: Exclude<CliSetupStepOutcome, "started">,
     args?: {
       readonly failureCategory?: CliSetupFailureCategory | undefined;
+      readonly instrumentation?: WizardEventInstrumentation | undefined;
     },
   ) => void;
   readonly terminate: (args: {
@@ -95,7 +99,7 @@ export type WizardEventsRuntime = {
 
 type ActiveStep = WizardEventStep & {
   readonly startedAtMs: number;
-  readonly startedSequence: number;
+  readonly stepSequence: number;
   readonly defaultFailureCategory: CliSetupFailureCategory | undefined;
   readonly instrumentationMode: CliSetupInstrumentationMode | undefined;
   readonly codingTool: string | undefined;
@@ -103,6 +107,7 @@ type ActiveStep = WizardEventStep & {
 
 type StepEventPropertiesBase = {
   readonly step: CliSetupStepName;
+  readonly stepSequence: number;
   readonly durationMs?: number | undefined;
   readonly instrumentationMode?: CliSetupInstrumentationMode | undefined;
   readonly codingTool?: string | undefined;
@@ -224,7 +229,7 @@ export function createWizardEvents(args: {
   let sessionPromise: Promise<WizardSessionCreateResponse | undefined>;
   let started = false;
   let terminated = false;
-  let stepSequence = 0;
+  let lastStepSequence = 0;
 
   function start(): Promise<WizardSessionCreateResponse | undefined> {
     if (!started) {
@@ -240,7 +245,12 @@ export function createWizardEvents(args: {
     return { ...clientContext.current };
   }
 
-  function instrumentationProperties(source = instrumentation): {
+  function instrumentationProperties(
+    source: {
+      readonly mode: CliSetupInstrumentationMode | undefined;
+      readonly codingTool?: string | undefined;
+    } = instrumentation,
+  ): {
     readonly instrumentationMode?: CliSetupInstrumentationMode | undefined;
     readonly codingTool?: string | undefined;
   } {
@@ -290,12 +300,12 @@ export function createWizardEvents(args: {
       readonly failureCategory?: CliSetupFailureCategory | undefined;
     },
   ): WizardEventStep {
-    const startedSequence = ++stepSequence;
-    const step = { id: String(startedSequence), name };
+    const stepSequence = ++lastStepSequence;
+    const step = { id: String(stepSequence), name };
     activeSteps.set(step.id, {
       ...step,
       startedAtMs: monotonicNow(),
-      startedSequence,
+      stepSequence,
       defaultFailureCategory: stepArgs?.failureCategory,
       instrumentationMode: instrumentation.mode,
       codingTool: instrumentation.codingTool,
@@ -306,6 +316,7 @@ export function createWizardEvents(args: {
       event: "cliSetupStep",
       properties: {
         step: name,
+        stepSequence,
         outcome: "started",
         ...instrumentationProperties(),
       },
@@ -318,19 +329,23 @@ export function createWizardEvents(args: {
     outcome: Exclude<CliSetupStepOutcome, "started">,
     finishArgs?: {
       readonly failureCategory?: CliSetupFailureCategory | undefined;
+      readonly instrumentation?: WizardEventInstrumentation | undefined;
     },
   ): void {
     const active = activeSteps.get(step.id);
     if (!active) return;
     activeSteps.delete(step.id);
-    const instrumentation = instrumentationProperties({
-      mode: active.instrumentationMode,
-      codingTool: active.codingTool,
-    });
+    const instrumentation = instrumentationProperties(
+      finishArgs?.instrumentation ?? {
+        mode: active.instrumentationMode,
+        codingTool: active.codingTool,
+      },
+    );
     const properties: StepEventProperties =
       outcome === "failed" || outcome === "cancelled"
         ? {
             step: active.name,
+            stepSequence: active.stepSequence,
             outcome,
             durationMs: Math.max(
               0,
@@ -344,6 +359,7 @@ export function createWizardEvents(args: {
           }
         : {
             step: active.name,
+            stepSequence: active.stepSequence,
             outcome,
             durationMs: Math.max(
               0,
@@ -391,7 +407,7 @@ export function createWizardEvents(args: {
       if (terminated) return;
       terminated = true;
       const active = [...activeSteps.values()].sort(
-        (a, b) => b.startedSequence - a.startedSequence,
+        (a, b) => b.stepSequence - a.stepSequence,
       );
       const currentStep = active[0];
       const failureCategory =

@@ -142,12 +142,14 @@ describe("createWizardEvents", () => {
     });
     expect(requests[1]?.properties).toMatchObject({
       step: "authentication",
+      stepSequence: 1,
       outcome: "completed",
       durationMs: 25,
     });
     expect(requests.every((request) => !("messageId" in request))).toBe(true);
     expect(requests[3]?.properties).toMatchObject({
       step: "instrumentation_run",
+      stepSequence: 2,
       outcome: "failed",
       durationMs: 25,
       instrumentationMode: "built_in",
@@ -164,6 +166,11 @@ describe("createWizardEvents", () => {
         codingTool: "codex",
       },
     });
+    expect(
+      requests
+        .filter((request) => request.event === "cliSetupStep")
+        .map((request) => request.properties.stepSequence),
+    ).toEqual([1, 1, 2, 2]);
   });
 
   it("does not send events when an older server omits the event token", async () => {
@@ -181,6 +188,58 @@ describe("createWizardEvents", () => {
     await events.terminate({ outcome: "completed" });
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows a finished selection step to report the newly selected instrumentation", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const events = createWizardEvents({
+      appUrl: "https://app.test",
+      clientContext: CONTEXT,
+      createSession: () => Promise.resolve(SESSION),
+      fetch: fetchMock,
+    });
+
+    const initialSelection = events.startStep("instrumentation_selection");
+    events.setInstrumentation({ mode: "built_in" });
+    events.finishStep(initialSelection, "completed", {
+      instrumentation: { mode: "built_in" },
+    });
+    events.setInstrumentation({ mode: "built_in", codingTool: "codex" });
+    const alternateSelection = events.startStep("instrumentation_selection");
+    events.setInstrumentation({ mode: "manual" });
+    events.finishStep(alternateSelection, "completed", {
+      instrumentation: { mode: "manual" },
+    });
+    await events.terminate({ outcome: "completed" });
+
+    const properties = fetchMock.mock.calls.map((call) => {
+      const init = call[1] as RequestInit;
+      return (
+        JSON.parse(init.body as string) as {
+          properties: Record<string, unknown>;
+        }
+      ).properties;
+    });
+    expect(properties[0]).not.toHaveProperty("instrumentationMode");
+    expect(properties[1]).toMatchObject({
+      step: "instrumentation_selection",
+      outcome: "completed",
+      instrumentationMode: "built_in",
+    });
+    expect(properties[2]).toMatchObject({
+      step: "instrumentation_selection",
+      outcome: "started",
+      instrumentationMode: "built_in",
+      codingTool: "codex",
+    });
+    expect(properties[3]).toMatchObject({
+      step: "instrumentation_selection",
+      outcome: "completed",
+      instrumentationMode: "manual",
+    });
+    expect(properties[3]).not.toHaveProperty("codingTool");
   });
 
   it("suppresses session and event delivery failures", async () => {

@@ -29,7 +29,11 @@ import {
   WizardCancelledError,
   type WizardDeps,
 } from "../src/clack-wizard";
-import type { WizardEventStep, WizardEventsRuntime } from "../src/events";
+import type {
+  WizardEventInstrumentation,
+  WizardEventStep,
+  WizardEventsRuntime,
+} from "../src/events";
 
 const clackMock = vi.hoisted(() => ({
   cancelSymbol: Symbol("cancel"),
@@ -404,6 +408,10 @@ function buildDeps(
 
 function createEventsRecorder() {
   const events: string[] = [];
+  const finishedSteps: Array<{
+    readonly step: WizardEventStep;
+    readonly instrumentation: WizardEventInstrumentation | undefined;
+  }> = [];
   let stepId = 0;
   const runtime: WizardEventsRuntime = {
     start: () => {
@@ -426,6 +434,10 @@ function createEventsRecorder() {
       return step;
     },
     finishStep: (step: WizardEventStep, outcome, finishArgs) => {
+      finishedSteps.push({
+        step,
+        instrumentation: finishArgs?.instrumentation,
+      });
       events.push(
         `step.finish:${step.name}:${outcome}:${finishArgs?.failureCategory ?? ""}`,
       );
@@ -437,7 +449,7 @@ function createEventsRecorder() {
       return Promise.resolve();
     },
   };
-  return { events, runtime };
+  return { events, finishedSteps, runtime };
 }
 
 function createBraintrustCliStub(
@@ -697,6 +709,11 @@ describe("runClackWizard", () => {
     const calls: string[] = [];
     let activeSmokeTests = 0;
     let maxActiveSmokeTests = 0;
+    const {
+      events: setupEvents,
+      finishedSteps,
+      runtime,
+    } = createEventsRecorder();
     const { events } = createPrompts({
       selects: [
         "yes",
@@ -709,6 +726,7 @@ describe("runClackWizard", () => {
       ],
     });
     const deps = buildDeps({
+      setupEvents: runtime,
       codingTools: {
         discover: () => {
           calls.push("discover");
@@ -775,6 +793,20 @@ describe("runClackWizard", () => {
     expect(codingAgentSpinnerClear).toBeGreaterThan(codingAgentSpinnerStart);
     expect(codingAgentSpinnerStart).toBeLessThan(instrumentationModePrompt);
     expect(codingAgentSpinnerClear).toBeLessThan(instrumentationModePrompt);
+    expect(setupEvents).toContain("step.start:coding_tool_confirmation");
+    expect(setupEvents).toContain(
+      "step.finish:coding_tool_confirmation:completed:",
+    );
+    expect(
+      setupEvents.indexOf("step.start:instrumentation_run"),
+    ).toBeGreaterThan(
+      setupEvents.indexOf("step.finish:coding_tool_confirmation:completed:"),
+    );
+    expect(
+      finishedSteps.find(
+        ({ step }) => step.name === "instrumentation_selection",
+      )?.instrumentation,
+    ).toEqual({ mode: "built_in" });
   });
 
   it("uses compact task log spacing for built-in coding agent output", async () => {
@@ -1514,8 +1546,13 @@ describe("runClackWizard", () => {
     expect(smokeCalls).toEqual(["claude", "codex"]);
   });
 
-  it("offers own-agent and manual setup when built-in coding agent execution is aborted", async () => {
+  it("offers own-agent and manual setup when built-in coding agent confirmation is declined", async () => {
     const calls: string[] = [];
+    const {
+      events: setupEvents,
+      finishedSteps,
+      runtime,
+    } = createEventsRecorder();
     const { events } = createPrompts({
       selects: [
         "yes",
@@ -1530,6 +1567,7 @@ describe("runClackWizard", () => {
       ],
     });
     const deps = buildDeps({
+      setupEvents: runtime,
       codingTools: {
         discover: () =>
           Promise.resolve([
@@ -1568,6 +1606,24 @@ describe("runClackWizard", () => {
     expect(events).not.toContain(
       "taskLog:Running Claude Code to instrument your application:0:false",
     );
+    expect(setupEvents).toContain("step.start:coding_tool_confirmation");
+    expect(setupEvents).toContain(
+      "step.finish:coding_tool_confirmation:skipped:",
+    );
+    expect(
+      setupEvents.filter((event) => event === "step.start:instrumentation_run"),
+    ).toHaveLength(1);
+    expect(
+      setupEvents.some(
+        (event) =>
+          event === "step.finish:instrumentation_run:cancelled:cancelled",
+      ),
+    ).toBe(false);
+    expect(
+      finishedSteps
+        .filter(({ step }) => step.name === "instrumentation_selection")
+        .map(({ instrumentation }) => instrumentation),
+    ).toEqual([{ mode: "built_in" }, { mode: "own_agent" }]);
     expect(calls).toEqual(["smoke"]);
   });
 
