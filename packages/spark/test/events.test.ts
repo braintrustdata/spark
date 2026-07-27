@@ -57,16 +57,10 @@ describe("setupAttribution", () => {
     ["unknown", { entryPoint: "direct" }],
     [undefined, { entryPoint: "direct" }],
   ] as const)("maps %s", (from, expected) => {
-    expect(setupAttribution({ from, ci: false })).toEqual(expected);
+    expect(setupAttribution({ from })).toEqual(expected);
   });
 
-  it("uses CI attribution regardless of the supplied source", () => {
-    expect(setupAttribution({ from: "homepage", ci: true })).toEqual({
-      entryPoint: "ci",
-    });
-  });
-
-  it("builds CI context from credential options", () => {
+  it("builds credential auth context without replacing the entry point", () => {
     const context = buildCliSetupClientContext({
       apiUrl: "https://api.test",
       appUrl: "https://app.test",
@@ -79,7 +73,7 @@ describe("setupAttribution", () => {
     });
 
     expect(context).toMatchObject({
-      entryPoint: "ci",
+      entryPoint: "homepage",
       authMode: "ci",
     });
     expect(context.cliVersion).toMatch(/^\d+\.\d+\.\d+$/);

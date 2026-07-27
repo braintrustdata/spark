@@ -16,8 +16,7 @@ export type WizardSessionCreateClientContext = {
     | "in_app_onboarding"
     | "in_app_setup"
     | "docs"
-    | "direct"
-    | "ci";
+    | "direct";
   readonly docsPage?:
     | "tracing_quickstart"
     | "csharp_quickstart"

@@ -7,8 +7,7 @@ export type CliSetupEntryPoint =
   | "in_app_onboarding"
   | "in_app_setup"
   | "docs"
-  | "direct"
-  | "ci";
+  | "direct";
 
 export type CliSetupDocsPage =
   | "tracing_quickstart"
@@ -168,9 +167,7 @@ const DOCS_PAGES = new Set<CliSetupDocsPage>([
 
 export function setupAttribution(args: {
   readonly from?: string | undefined;
-  readonly ci: boolean;
 }): Pick<CliSetupClientContext, "entryPoint" | "docsPage"> {
-  if (args.ci) return { entryPoint: "ci" };
   if (args.from === "homepage") return { entryPoint: "homepage" };
   if (args.from === "in_app_onboarding") {
     return { entryPoint: "in_app_onboarding" };
@@ -196,7 +193,7 @@ export function buildCliSetupClientContext(
     cliVersion: pkg.version,
     platform: process.platform,
     architecture: process.arch,
-    ...setupAttribution({ from: options.from, ci }),
+    ...setupAttribution({ from: options.from }),
     ...(ci ? { authMode: "ci" as const } : {}),
   };
 }
