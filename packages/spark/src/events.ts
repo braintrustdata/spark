@@ -1,24 +1,21 @@
 import pkg from "../package.json" with { type: "json" };
 import type { WizardSessionCreateResponse } from "./auth";
 import type { WizardOptions } from "./options";
+import {
+  CLI_SETUP_DOCS_PAGES,
+  type CliSetupAuthMode,
+  type CliSetupClientContext,
+  type CliSetupDocsPage,
+  type CliSetupEntryPoint,
+} from "./setup-events-contract";
 
-export type CliSetupEntryPoint =
-  | "homepage"
-  | "in_app_onboarding"
-  | "in_app_setup"
-  | "docs"
-  | "direct";
+export type {
+  CliSetupAuthMode,
+  CliSetupClientContext,
+  CliSetupDocsPage,
+  CliSetupEntryPoint,
+};
 
-export type CliSetupDocsPage =
-  | "tracing_quickstart"
-  | "csharp_quickstart"
-  | "go_quickstart"
-  | "java_quickstart"
-  | "python_quickstart"
-  | "ruby_quickstart"
-  | "typescript_quickstart";
-
-export type CliSetupAuthMode = "signin" | "signup" | "ci";
 export type CliSetupInstrumentationMode = "built_in" | "own_agent" | "manual";
 
 export type CliSetupStepName =
@@ -52,15 +49,6 @@ export type CliSetupFailureCategory =
   | "trace_not_observed"
   | "cancelled"
   | "unknown";
-
-export type CliSetupClientContext = {
-  readonly cliVersion: string;
-  readonly platform: string;
-  readonly architecture: string;
-  readonly entryPoint: CliSetupEntryPoint;
-  readonly docsPage?: CliSetupDocsPage | undefined;
-  readonly authMode?: CliSetupAuthMode | undefined;
-};
 
 export type WizardEventStep = {
   readonly id: string;
@@ -155,15 +143,6 @@ const EVENT_REQUEST_TIMEOUT_MS = 2_000;
 const FINAL_FLUSH_TIMEOUT_MS = 2_000;
 
 const DOCS_SOURCE_PREFIX = "docs_";
-const DOCS_PAGES = new Set<CliSetupDocsPage>([
-  "tracing_quickstart",
-  "csharp_quickstart",
-  "go_quickstart",
-  "java_quickstart",
-  "python_quickstart",
-  "ruby_quickstart",
-  "typescript_quickstart",
-]);
 
 export function setupAttribution(args: {
   readonly from?: string | undefined;
@@ -174,11 +153,14 @@ export function setupAttribution(args: {
   }
   if (args.from === "in_app_setup") return { entryPoint: "in_app_setup" };
   if (args.from?.startsWith(DOCS_SOURCE_PREFIX)) {
-    const docsPage = args.from.slice(DOCS_SOURCE_PREFIX.length);
-    if (DOCS_PAGES.has(docsPage as CliSetupDocsPage)) {
+    const sourcePage = args.from.slice(DOCS_SOURCE_PREFIX.length);
+    const docsPage = CLI_SETUP_DOCS_PAGES.find(
+      (candidate) => candidate === sourcePage,
+    );
+    if (docsPage !== undefined) {
       return {
         entryPoint: "docs",
-        docsPage: docsPage as CliSetupDocsPage,
+        docsPage,
       };
     }
   }

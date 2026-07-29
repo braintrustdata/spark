@@ -1,3 +1,5 @@
+import type { CliSetupClientContext } from "./setup-events-contract";
+
 export type WizardSessionCreateResponse = {
   readonly session_token: string;
   readonly poll_token: string;
@@ -7,27 +9,7 @@ export type WizardSessionCreateResponse = {
   readonly event_token?: string | undefined;
 };
 
-export type WizardSessionCreateClientContext = {
-  readonly cliVersion: string;
-  readonly platform: string;
-  readonly architecture: string;
-  readonly entryPoint:
-    | "homepage"
-    | "in_app_onboarding"
-    | "in_app_setup"
-    | "docs"
-    | "direct";
-  readonly docsPage?:
-    | "tracing_quickstart"
-    | "csharp_quickstart"
-    | "go_quickstart"
-    | "java_quickstart"
-    | "python_quickstart"
-    | "ruby_quickstart"
-    | "typescript_quickstart"
-    | undefined;
-  readonly authMode?: "signin" | "signup" | "ci" | undefined;
-};
+export type WizardSessionCreateClientContext = CliSetupClientContext;
 
 export type WizardSessionCompleteResult = {
   readonly apiKey: string;
