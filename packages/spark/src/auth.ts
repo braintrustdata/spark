@@ -1,10 +1,15 @@
+import type { CliSetupClientContext } from "./setup-events-contract";
+
 export type WizardSessionCreateResponse = {
   readonly session_token: string;
   readonly poll_token: string;
   readonly expires_at: string;
   readonly login_path: string;
   readonly verification_code: string;
+  readonly event_token?: string | undefined;
 };
+
+export type WizardSessionCreateClientContext = CliSetupClientContext;
 
 export type WizardSessionCompleteResult = {
   readonly apiKey: string;
@@ -42,6 +47,7 @@ export type WizardSessionLoginUrlParams = {
 export type WizardSessionLoginArgs = {
   readonly events: WizardSessionEvents;
   readonly loginUrlParams?: WizardSessionLoginUrlParams;
+  readonly session?: WizardSessionCreateResponse | undefined;
 };
 
 const POLL_INTERVAL_MS = 2000;
@@ -60,13 +66,27 @@ export type WizardSessionLogin = (
 
 export async function createWizardSession(
   appUrl: string,
+  clientContext?: WizardSessionCreateClientContext,
+  signal?: AbortSignal,
 ): Promise<WizardSessionCreateResponse> {
   const res = await fetch(`${appUrl}/api/cli/wizard-session/create`, {
     method: "POST",
     headers: {
       Accept: "application/json",
+      ...(clientContext === undefined
+        ? {}
+        : { "Content-Type": "application/json" }),
     },
-    signal: AbortSignal.timeout(CREATE_REQUEST_TIMEOUT_MS),
+    ...(clientContext === undefined
+      ? {}
+      : { body: JSON.stringify({ clientContext }) }),
+    signal:
+      signal === undefined
+        ? AbortSignal.timeout(CREATE_REQUEST_TIMEOUT_MS)
+        : AbortSignal.any([
+            signal,
+            AbortSignal.timeout(CREATE_REQUEST_TIMEOUT_MS),
+          ]),
   });
   if (!res.ok) {
     throw new Error(
@@ -164,8 +184,9 @@ export async function loginWithWizardSession(args: {
   readonly appUrl: string;
   readonly loginUrlParams?: WizardSessionLoginUrlParams;
   readonly events: WizardSessionEvents;
+  readonly session?: WizardSessionCreateResponse | undefined;
 }): Promise<WizardSessionCompleteResult> {
-  const session = await createWizardSession(args.appUrl);
+  const session = args.session ?? (await createWizardSession(args.appUrl));
   const loginUrl = buildWizardSessionLoginUrl(
     args.appUrl,
     session,

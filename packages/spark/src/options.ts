@@ -10,6 +10,7 @@ export type WizardOptions = {
   readonly orgId: string | undefined;
   readonly projId: string | undefined;
   readonly yolo: boolean;
+  readonly from?: string | undefined;
 };
 
 export const DEFAULT_API_URL = "https://api.braintrust.dev";
@@ -51,6 +52,11 @@ function buildParser(env: NodeJS.ProcessEnv) {
     })
     .option("setup-yolo", {
       type: "boolean",
+      hidden: true,
+    })
+    .option("from", {
+      type: "string",
+      description: "Identify where setup was launched from",
       hidden: true,
     })
     .help()
@@ -99,6 +105,7 @@ export async function parseArgs(
     orgId: parsed["org-id"],
     projId: parsed["proj-id"],
     yolo,
+    from: parsed.from,
   };
 }
 
