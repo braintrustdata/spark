@@ -38,8 +38,8 @@ export const CLACK_WIZARD_COPY = {
         hint: "Continue without git",
       },
       no: {
-        label: "No (recommended)",
-        hint: "Stop wizard",
+        label: "Exit and change directories (recommended)",
+        hint: "Rerun Braintrust Setup from your project directory",
       },
     },
     dirtyRepoWarning: (files: readonly string[]) => {
@@ -64,8 +64,8 @@ export const CLACK_WIZARD_COPY = {
         hint: "Continue",
       },
       no: {
-        label: "No",
-        hint: "Cancel setup and close wizard",
+        label: "Exit and protect current changes",
+        hint: "Commit or stash changes, then rerun setup",
       },
     },
   },
@@ -98,7 +98,8 @@ export const CLACK_WIZARD_COPY = {
         ),
         chalk.dim(args.loginLink),
       ].join("\n"),
-    waitingForBrowser: "Waiting for you to sign in via the browser...",
+    waitingForBrowser:
+      "Waiting for browser setup (the link remains valid for 15 minutes)...",
     browserSetupComplete: (args: {
       readonly orgName: string;
       readonly projectName: string;
@@ -267,27 +268,57 @@ export const CLACK_WIZARD_COPY = {
           `If traces are not showing up, visit the troubleshooting guide:\nhttps://www.braintrust.dev/docs/kb/troubleshooting-guides\n`,
         ),
       ].join("\n"),
-    checked: "I've confirmed my application is sending traces.",
-    hint: "Press Enter to continue",
+    choices: {
+      checked: {
+        label: "I've confirmed my application is sending traces",
+        hint: "Mark trace verification complete",
+      },
+      later: {
+        label: "Finish trace verification later",
+        hint: "Complete local setup without blocking here",
+      },
+    },
   },
 
   productionToken: {
     question: `Production Setup: Add the ${chalk.cyanBright("BRAINTRUST_API_KEY")} token from your local ${chalk.bold("./.env.braintrust")} file to your production environment as environment variable.\n`,
-    confirmed: `I have added ${chalk.bold("BRAINTRUST_API_KEY")} to my production env.`,
-    hint: "Press Enter to continue",
+    choices: {
+      confirmed: {
+        label: `I have added ${chalk.bold("BRAINTRUST_API_KEY")} to my production env`,
+        hint: "Mark production setup complete",
+      },
+      later: {
+        label: "Configure production later",
+        hint: "Finish local setup now",
+      },
+    },
   },
 
   outro: {
-    complete: [
-      chalk.dim("Braintrust setup complete."),
-      "",
-      "You can now use Braintrust in production.",
-      "",
-      `If you encountered any issues during setup, please open an issue at ${GITHUB_ISSUE_URL}.`,
-      "",
-      chalk.dim(`- Contact support: ${SUPPORT_URL}`),
-      chalk.dim(`- Further documentation: ${INSTRUMENTATION_DOCS_URL}`),
-    ].join("\n"),
+    complete: (args: {
+      readonly traceConfirmed: boolean;
+      readonly productionConfigured: boolean;
+    }) =>
+      [
+        chalk.dim("Braintrust local setup complete."),
+        "",
+        ...(args.traceConfirmed
+          ? []
+          : ["Next: Run your application and confirm traces in Braintrust."]),
+        ...(args.productionConfigured
+          ? []
+          : [
+              `Next: Add ${chalk.bold("BRAINTRUST_API_KEY")} to your production environment.`,
+            ]),
+        ...(args.traceConfirmed && args.productionConfigured
+          ? ["You can now use Braintrust in production."]
+          : []),
+        "",
+        `If you encountered any issues during setup, please open an issue at ${GITHUB_ISSUE_URL}.`,
+        "",
+        chalk.dim(`- Contact support: ${SUPPORT_URL}`),
+        chalk.dim(`- Further documentation: ${INSTRUMENTATION_DOCS_URL}`),
+      ].join("\n"),
   },
 } as const;
 

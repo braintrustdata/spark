@@ -38,6 +38,16 @@ export type WizardSessionEvents = {
 
 export type WizardSessionAuthMode = "signin" | "signup";
 
+export class WizardSessionLoginError extends Error {
+  constructor(
+    message: string,
+    readonly reasonCode: "browser_auth_failed" | "browser_auth_timed_out",
+  ) {
+    super(message);
+    this.name = "WizardSessionLoginError";
+  }
+}
+
 export type WizardSessionLoginUrlParams = {
   readonly orgId?: string | undefined;
   readonly projectId?: string | undefined;
@@ -53,7 +63,9 @@ export type WizardSessionLoginArgs = {
 const POLL_INTERVAL_MS = 2000;
 const SLOW_DOWN_INCREMENT_MS = 1000;
 const MAX_POLL_INTERVAL_MS = 30_000;
-const POLL_HARD_TIMEOUT_MS = 3 * 60 * 1000;
+// Browser signup can include account, organization, and project creation. Keep
+// polling for nearly the full 15-minute lifetime of the backend session.
+const POLL_HARD_TIMEOUT_MS = 14 * 60 * 1000;
 const CREATE_REQUEST_TIMEOUT_MS = 15_000;
 const POLL_REQUEST_TIMEOUT_MS = 30_000;
 const LOGIN_ORG_ID_PARAM = "org_id";
@@ -126,14 +138,21 @@ export async function pollWizardSession(args: {
   while (Date.now() < deadline) {
     await sleep(interval);
     const url = `${args.appUrl}/api/cli/wizard-session/poll?session_token=${encodeURIComponent(args.sessionToken)}`;
-    const res = await fetch(url, {
-      method: "GET",
-      headers: {
-        Authorization: `Bearer ${args.pollToken}`,
-        Accept: "application/json",
-      },
-      signal: AbortSignal.timeout(POLL_REQUEST_TIMEOUT_MS),
-    });
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${args.pollToken}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(POLL_REQUEST_TIMEOUT_MS),
+      });
+    } catch {
+      // A transient connection failure should not make the user restart the
+      // browser flow. Retry until the signed session reaches its deadline.
+      continue;
+    }
     if (res.status === 429) {
       interval = Math.min(
         interval + SLOW_DOWN_INCREMENT_MS,
@@ -147,8 +166,9 @@ export async function pollWizardSession(args: {
       unknown
     >;
     if (!res.ok) {
-      throw new Error(
+      throw new WizardSessionLoginError(
         `Wizard session poll failed: ${res.status} ${JSON.stringify(json)}`,
+        "browser_auth_failed",
       );
     }
     const status = json["status"];
@@ -156,10 +176,14 @@ export async function pollWizardSession(args: {
       case "pending":
         continue;
       case "expired":
-        throw new Error("Wizard session expired before approval.");
+        throw new WizardSessionLoginError(
+          "Wizard session expired before approval.",
+          "browser_auth_timed_out",
+        );
       case "claimed":
-        throw new Error(
+        throw new WizardSessionLoginError(
           "Wizard session was already claimed by another client.",
+          "browser_auth_failed",
         );
       case "complete": {
         const complete = json as WizardSessionCompleteResponse;
@@ -172,12 +196,16 @@ export async function pollWizardSession(args: {
         };
       }
       default:
-        throw new Error(
+        throw new WizardSessionLoginError(
           `Unexpected wizard session status: ${JSON.stringify(json)}`,
+          "browser_auth_failed",
         );
     }
   }
-  throw new Error("Wizard session timed out.");
+  throw new WizardSessionLoginError(
+    "Wizard session timed out.",
+    "browser_auth_timed_out",
+  );
 }
 
 export async function loginWithWizardSession(args: {

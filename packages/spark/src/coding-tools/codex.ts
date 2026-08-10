@@ -96,6 +96,8 @@ export function codexStatusFromResult(
     return {
       ...base,
       usable: false,
+      unavailableReasonCode:
+        auth.exitCode === 0 ? "not_authenticated" : "status_check_failed",
       unavailableReason:
         firstNonEmptyLine(auth.stderr, auth.stdout) ??
         "Codex is not logged in.",
