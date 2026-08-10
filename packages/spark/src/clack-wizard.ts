@@ -8,6 +8,7 @@ import pc from "picocolors";
 import {
   createWizardSession,
   loginWithWizardSession as loginWithWizardSessionRequest,
+  WizardSessionLoginError,
   type WizardSessionCompleteResult,
   type WizardSessionCreateResponse,
   type WizardSessionLoginUrlParams,
@@ -39,13 +40,16 @@ import {
   writeEnvBraintrust,
 } from "./git";
 import { allocateResultFile, readResultFile } from "./instrument";
-import type { WizardOptions } from "./options";
+import { DEFAULT_APP_URL, type WizardOptions } from "./options";
 import { renderPrompt } from "./prompt";
 import { ClackToolRenderer } from "./tool-ui";
 import {
   buildCliSetupClientContext,
   createWizardEvents,
+  type CliSetupCodingToolResult,
   type CliSetupFailureCategory,
+  type CliSetupReasonCode,
+  type WizardEventStep,
   type WizardEventsRuntime,
 } from "./events";
 
@@ -75,14 +79,23 @@ type InstrumentationModeChoice =
 type OwnAgentPromptDelivery = "clipboard" | "terminal";
 
 type BraintrustCliBackgroundTask = {
-  readonly wait: (
-    spinner: WizardStepSpinner,
-  ) => Promise<"completed" | "failed">;
+  readonly wait: (spinner: WizardStepSpinner) => Promise<
+    | { readonly outcome: "completed" }
+    | {
+        readonly outcome: "failed";
+        readonly reasonCode: "bt_cli_status_failed";
+      }
+  >;
 };
 
 type BraintrustCliSetupResult =
   | {
       readonly outcome: "skipped" | "failed";
+      readonly reasonCode:
+        | "bt_cli_install_declined"
+        | "bt_cli_context_switch_declined"
+        | "bt_cli_install_failed"
+        | "bt_cli_status_failed";
     }
   | {
       readonly outcome: "pending";
@@ -107,9 +120,12 @@ function createBraintrustCliBackgroundTask(
             summarizeBraintrustCliError(error),
           ),
         );
-        return "failed";
+        return {
+          outcome: "failed" as const,
+          reasonCode: "bt_cli_status_failed" as const,
+        };
       }
-      return "completed";
+      return { outcome: "completed" as const };
     },
   };
 }
@@ -191,9 +207,23 @@ export type CodingToolRuntime = {
 };
 
 export class WizardCancelledError extends Error {
-  constructor(readonly failureCategory: CliSetupFailureCategory = "cancelled") {
+  constructor(
+    readonly failureCategory: CliSetupFailureCategory = "cancelled",
+    readonly reasonCode: CliSetupReasonCode = "user_interrupt",
+  ) {
     super(WIZARD_CANCEL_MESSAGE);
     this.name = "WizardCancelledError";
+  }
+}
+
+class WizardFailedError extends Error {
+  constructor(
+    message: string,
+    readonly failureCategory: CliSetupFailureCategory,
+    readonly reasonCode: CliSetupReasonCode,
+  ) {
+    super(message);
+    this.name = "WizardFailedError";
   }
 }
 
@@ -232,6 +262,50 @@ async function selectBoolean(args: {
   );
 }
 
+async function confirmRepositoryContinuation(args: {
+  readonly events: WizardEventsRuntime;
+  readonly step: WizardEventStep;
+  readonly state: "dirty" | "not_git";
+  readonly message: string;
+  readonly choices: BooleanSelectChoices;
+  readonly declinedReason:
+    | "repository_dirty_declined"
+    | "repository_not_git_declined";
+}): Promise<void> {
+  let shouldContinue: boolean;
+  try {
+    shouldContinue = await selectBoolean({
+      message: args.message,
+      choices: args.choices,
+      yesFirst: false,
+    });
+  } catch (error) {
+    args.events.finishStep(args.step, "cancelled", {
+      failureCategory: "cancelled",
+      reasonCode: "user_interrupt",
+      repositoryState: args.state,
+      repositoryDecision: "cancel",
+    });
+    throw error;
+  }
+
+  if (!shouldContinue) {
+    args.events.finishStep(args.step, "cancelled", {
+      failureCategory: "repository_state",
+      reasonCode: args.declinedReason,
+      repositoryState: args.state,
+      repositoryDecision: "cancel",
+    });
+    clack.cancel(WIZARD_CANCEL_MESSAGE);
+    throw new WizardCancelledError("repository_state", args.declinedReason);
+  }
+
+  args.events.finishStep(args.step, "completed", {
+    repositoryState: args.state,
+    repositoryDecision: "continue",
+  });
+}
+
 export type WizardResult = {
   readonly orgName: string;
   readonly projectName: string;
@@ -250,9 +324,15 @@ export async function runClackWizard(deps: WizardDeps): Promise<WizardResult> {
     return result;
   } catch (error) {
     const cancelled = error instanceof WizardCancelledError;
+    const categorizedFailure = error instanceof WizardFailedError;
     await events.terminate({
       outcome: cancelled ? "cancelled" : "failed",
-      ...(cancelled ? { failureCategory: error.failureCategory } : {}),
+      ...(cancelled || categorizedFailure
+        ? { failureCategory: error.failureCategory }
+        : {}),
+      ...(cancelled || categorizedFailure
+        ? { reasonCode: error.reasonCode }
+        : { reasonCode: "unknown" as const }),
     });
     throw error;
   }
@@ -263,64 +343,102 @@ async function runClackWizardFlow(
   events: WizardEventsRuntime,
   wizardSession: Promise<WizardSessionCreateResponse | undefined>,
 ): Promise<WizardResult> {
+  const repositoryStep = events.startStep("repository_preflight", {
+    failureCategory: "repository_state",
+  });
   const inGitRepo = await isGitRepo(deps.cwd);
   if (!inGitRepo) {
-    const continueOutsideGit = await selectBoolean({
+    await confirmRepositoryContinuation({
+      events,
+      step: repositoryStep,
+      state: "not_git",
       message: COPY.gitRepository.outsideRepoWarning,
       choices: COPY.gitRepository.continueOutsideRepoChoices,
-      yesFirst: false,
+      declinedReason: "repository_not_git_declined",
     });
-    if (!continueOutsideGit) {
-      clack.cancel(WIZARD_CANCEL_MESSAGE);
-      throw new WizardCancelledError("repository_state");
-    }
   } else {
     const dirtyFiles = await getUncommittedOrUntrackedFiles(deps.cwd);
     if (dirtyFiles.length > 0) {
-      const continueWithDirtyRepo = await selectBoolean({
+      await confirmRepositoryContinuation({
+        events,
+        step: repositoryStep,
+        state: "dirty",
         message: COPY.gitRepository.dirtyRepoWarning(dirtyFiles),
         choices: COPY.gitRepository.continueWithDirtyRepoChoices,
-        yesFirst: false,
+        declinedReason: "repository_dirty_declined",
       });
-      if (!continueWithDirtyRepo) {
-        clack.cancel(WIZARD_CANCEL_MESSAGE);
-        throw new WizardCancelledError("repository_state");
-      }
+    } else {
+      events.finishStep(repositoryStep, "completed", {
+        repositoryState: "clean",
+        repositoryDecision: "not_required",
+      });
     }
   }
   const authenticationStep = events.startStep("authentication", {
     failureCategory: "auth",
   });
   let session: WizardSessionCompleteResult;
-  if (
-    deps.options.apiKey !== undefined &&
-    deps.options.projectId !== undefined
-  ) {
-    events.setAuthMode("ci");
-    session = await loginWithCiCredentials({
-      apiKey: deps.options.apiKey,
-      projectId: deps.options.projectId,
-      apiUrl: deps.options.apiUrl,
+  try {
+    if (
+      deps.options.apiKey !== undefined &&
+      deps.options.projectId !== undefined
+    ) {
+      events.setAuthMode("ci");
+      session = await loginWithCiCredentials({
+        apiKey: deps.options.apiKey,
+        projectId: deps.options.projectId,
+        apiUrl: deps.options.apiUrl,
+      });
+    } else {
+      let authMode: WizardSessionLoginUrlParams["authMode"];
+      if (
+        deps.options.orgId !== undefined &&
+        deps.options.projId !== undefined
+      ) {
+        authMode = "signin";
+      } else {
+        authMode = (await hasBraintrustAccount()) ? "signin" : "signup";
+      }
+      events.setAuthMode(authMode);
+      session = await loginWithBrowser(deps, {
+        authMode,
+        wizardSession: await wizardSession,
+      });
+    }
+  } catch (error) {
+    if (error instanceof WizardCancelledError) throw error;
+    const reasonCode =
+      error instanceof WizardSessionLoginError
+        ? error.reasonCode
+        : "browser_auth_failed";
+    events.finishStep(authenticationStep, "failed", {
+      failureCategory: "auth",
+      reasonCode,
     });
-  } else {
-    const authMode =
-      deps.options.orgId !== undefined && deps.options.projId !== undefined
-        ? "signin"
-        : (await hasBraintrustAccount())
-          ? "signin"
-          : "signup";
-    events.setAuthMode(authMode);
-    session = await loginWithBrowser(deps, {
-      authMode,
-      wizardSession: await wizardSession,
-    });
+    throw new WizardFailedError(
+      error instanceof Error ? error.message : String(error),
+      "auth",
+      reasonCode,
+    );
   }
   events.finishStep(authenticationStep, "completed");
 
   const credentialsStep = events.startStep("credentials_write", {
     failureCategory: "filesystem",
   });
-  await writeLocalEnvBraintrust(deps, session.apiKey);
+  try {
+    await writeLocalEnvBraintrust(deps, session.apiKey);
+  } catch (error) {
+    events.finishStep(credentialsStep, "failed", {
+      failureCategory: "filesystem",
+      reasonCode: "credentials_write_failed",
+    });
+    throw new WizardFailedError(
+      error instanceof Error ? error.message : String(error),
+      "filesystem",
+      "credentials_write_failed",
+    );
+  }
   events.finishStep(credentialsStep, "completed");
 
   const setupSpinner = new WizardStepSpinner();
@@ -340,6 +458,7 @@ async function runClackWizardFlow(
         ...(braintrustCliSetup.outcome === "failed"
           ? { failureCategory: "bt_cli" as const }
           : {}),
+        reasonCode: braintrustCliSetup.reasonCode,
       });
     }
     const codingToolPreflightStep = events.startStep("coding_tool_preflight", {
@@ -349,13 +468,29 @@ async function runClackWizardFlow(
     const hasUsableCodingTool = codingToolStatuses.some(
       (status) => status.usable,
     );
-    events.finishStep(
-      codingToolPreflightStep,
-      hasUsableCodingTool ? "completed" : "failed",
-      hasUsableCodingTool
-        ? undefined
-        : { failureCategory: "coding_tool_unavailable" },
-    );
+    const codingToolResults = codingToolStatuses.map((status) => {
+      const result: CliSetupCodingToolResult = {
+        toolId: status.id,
+        detected: status.installed,
+        usable: status.usable,
+      };
+      if (status.unavailableReasonCode === undefined) return result;
+      return {
+        ...result,
+        unavailableReasonCode: status.unavailableReasonCode,
+      };
+    });
+    if (hasUsableCodingTool) {
+      events.finishStep(codingToolPreflightStep, "completed", {
+        codingToolResults,
+      });
+    } else {
+      events.finishStep(codingToolPreflightStep, "failed", {
+        failureCategory: "coding_tool_unavailable",
+        reasonCode: "no_usable_coding_tool",
+        codingToolResults,
+      });
+    }
   } finally {
     setupSpinner.clear();
   }
@@ -366,24 +501,19 @@ async function runClackWizardFlow(
     warnNoUsableCodingTools(codingToolStatuses);
   }
 
-  const instrumentationSelectionStep = events.startStep(
-    "instrumentation_selection",
-  );
   let instrumentationMode: InstrumentationModeChoice | undefined =
-    await selectInstrumentationMode({
+    await selectAndTrackInstrumentationMode(events, {
       includeBuiltIn: hasUsableCodingTool,
     });
-  const selectedInstrumentation = {
-    mode: eventInstrumentationMode(instrumentationMode),
-  };
-  events.setInstrumentation(selectedInstrumentation);
-  events.finishStep(instrumentationSelectionStep, "completed", {
-    instrumentation: selectedInstrumentation,
-  });
   if (braintrustCliSetup.outcome === "pending") {
-    const outcome = await braintrustCliSetup.backgroundTask.wait(setupSpinner);
-    events.finishStep(braintrustCliStep, outcome, {
-      ...(outcome === "failed" ? { failureCategory: "bt_cli" as const } : {}),
+    const result = await braintrustCliSetup.backgroundTask.wait(setupSpinner);
+    events.finishStep(braintrustCliStep, result.outcome, {
+      ...(result.outcome === "failed"
+        ? {
+            failureCategory: "bt_cli" as const,
+            reasonCode: result.reasonCode,
+          }
+        : {}),
     });
   }
   setupSpinner.clear();
@@ -420,32 +550,47 @@ async function runClackWizardFlow(
       const instrumentationRunStep = events.startStep("instrumentation_run", {
         failureCategory: "coding_tool_failed",
       });
-      const result = await runInstrumentation(deps, {
-        org: session.orgName,
-        project: session.projectName,
-        apiKey: session.apiKey,
-        toolId: instrumentation.id,
-      });
-      events.finishStep(instrumentationRunStep, result.outcome, {
-        ...(result.outcome === "failed"
-          ? { failureCategory: "coding_tool_failed" as const }
-          : {}),
-      });
-      instrumentationMode = undefined;
+      let result: InstrumentationResult;
+      try {
+        result = await runInstrumentation(deps, {
+          org: session.orgName,
+          project: session.projectName,
+          apiKey: session.apiKey,
+          toolId: instrumentation.id,
+        });
+      } catch (error) {
+        events.finishStep(instrumentationRunStep, "failed", {
+          failureCategory: "coding_tool_failed",
+          reasonCode: "coding_tool_exception",
+          instrumentationResult: "exception",
+        });
+        throw new WizardFailedError(
+          error instanceof Error ? error.message : String(error),
+          "coding_tool_failed",
+          "coding_tool_exception",
+        );
+      }
+      if (result.outcome === "completed") {
+        events.finishStep(instrumentationRunStep, "completed", {
+          instrumentationResult: result.instrumentationResult,
+        });
+        instrumentationMode = undefined;
+      } else {
+        events.finishStep(instrumentationRunStep, "failed", {
+          failureCategory: "coding_tool_failed",
+          reasonCode: result.reasonCode,
+          instrumentationResult: result.instrumentationResult,
+        });
+        instrumentationMode = await selectAndTrackInstrumentationMode(events, {
+          includeBuiltIn: false,
+        });
+      }
     } else {
-      events.finishStep(codingToolConfirmationStep, "skipped");
-      const alternateSelectionStep = events.startStep(
-        "instrumentation_selection",
-      );
-      instrumentationMode = await selectInstrumentationMode({
-        includeBuiltIn: false,
+      events.finishStep(codingToolConfirmationStep, "skipped", {
+        reasonCode: "built_in_instrumentation_declined",
       });
-      const alternateInstrumentation = {
-        mode: eventInstrumentationMode(instrumentationMode),
-      };
-      events.setInstrumentation(alternateInstrumentation);
-      events.finishStep(alternateSelectionStep, "completed", {
-        instrumentation: alternateInstrumentation,
+      instrumentationMode = await selectAndTrackInstrumentationMode(events, {
+        includeBuiltIn: false,
       });
     }
   }
@@ -467,14 +612,28 @@ async function runClackWizardFlow(
   const traceVerificationStep = events.startStep("trace_verification", {
     failureCategory: "trace_not_observed",
   });
-  await confirmTraceLogs(projectLogsUrl);
-  events.finishStep(traceVerificationStep, "completed");
+  const traceConfirmed = await confirmTraceLogs(projectLogsUrl);
+  if (traceConfirmed) {
+    events.finishStep(traceVerificationStep, "completed", {
+      verificationMethod: "self_reported",
+    });
+  } else {
+    events.finishStep(traceVerificationStep, "skipped", {
+      reasonCode: "trace_check_cancelled",
+    });
+  }
 
   const productionSetupStep = events.startStep("production_setup");
-  await confirmProductionApiKey();
-  events.finishStep(productionSetupStep, "completed");
+  const productionConfigured = await confirmProductionApiKey();
+  if (productionConfigured) {
+    events.finishStep(productionSetupStep, "completed");
+  } else {
+    events.finishStep(productionSetupStep, "skipped", {
+      reasonCode: "production_setup_cancelled",
+    });
+  }
 
-  clack.outro(COPY.outro.complete);
+  clack.outro(COPY.outro.complete({ traceConfirmed, productionConfigured }));
 
   return {
     orgName: session.orgName,
@@ -571,6 +730,20 @@ async function selectInstrumentationMode(args: {
   );
 }
 
+async function selectAndTrackInstrumentationMode(
+  events: WizardEventsRuntime,
+  args: { readonly includeBuiltIn: boolean },
+): Promise<InstrumentationModeChoice> {
+  const step = events.startStep("instrumentation_selection");
+  const choice = await selectInstrumentationMode(args);
+  const instrumentation = {
+    mode: eventInstrumentationMode(choice),
+  };
+  events.setInstrumentation(instrumentation);
+  events.finishStep(step, "completed", { instrumentation });
+  return choice;
+}
+
 function eventInstrumentationMode(
   choice: InstrumentationModeChoice,
 ): "built_in" | "own_agent" | "manual" {
@@ -631,7 +804,12 @@ async function handleBraintrustCliSetup(
       choices: COPY.braintrustCli.installChoices,
       yesFirst: true,
     });
-    if (!shouldInstall) return { outcome: "skipped" };
+    if (!shouldInstall) {
+      return {
+        outcome: "skipped",
+        reasonCode: "bt_cli_install_declined",
+      };
+    }
 
     spinner.update(COPY.braintrustCli.installing);
     try {
@@ -641,7 +819,7 @@ async function handleBraintrustCliSetup(
       clack.log.warn(
         COPY.braintrustCli.installFailed(summarizeBraintrustCliError(error)),
       );
-      return { outcome: "failed" };
+      return { outcome: "failed", reasonCode: "bt_cli_install_failed" };
     }
 
     discovery = await deps.braintrustCli.discover();
@@ -649,11 +827,13 @@ async function handleBraintrustCliSetup(
     if (!discovery.installed || !commandPath) {
       spinner.clear();
       clack.log.warn(COPY.braintrustCli.installedButNotFound);
-      return { outcome: "failed" };
+      return { outcome: "failed", reasonCode: "bt_cli_install_failed" };
     }
   }
 
-  if (!commandPath) return { outcome: "skipped" };
+  if (!commandPath) {
+    return { outcome: "failed", reasonCode: "bt_cli_status_failed" };
+  }
 
   let currentContext: BraintrustCliContext;
   spinner.update(COPY.braintrustCli.checkingContext);
@@ -661,7 +841,7 @@ async function handleBraintrustCliSetup(
     currentContext = await deps.braintrustCli.status(commandPath);
   } catch {
     spinner.clear();
-    return { outcome: "failed" };
+    return { outcome: "failed", reasonCode: "bt_cli_status_failed" };
   }
 
   const targetContext = {
@@ -680,7 +860,10 @@ async function handleBraintrustCliSetup(
       yesFirst: true,
     });
     if (!shouldSwitch) {
-      return { outcome: "skipped" };
+      return {
+        outcome: "skipped",
+        reasonCode: "bt_cli_context_switch_declined",
+      };
     }
 
     return {
@@ -754,6 +937,7 @@ async function preflightCodingTools(
             ...status,
             usable: false,
             unavailableReason: message || "Smoke test failed.",
+            unavailableReasonCode: "smoke_test_failed",
           };
         }
       }),
@@ -890,40 +1074,65 @@ function printInstrumentationPrompt(promptText: string): void {
   process.stdout.write(`\n${promptText}\n\n`);
 }
 
-async function confirmTraceLogs(projectLogsUrl: string): Promise<void> {
-  unwrap(
-    await clack.select<"checked">({
+async function confirmTraceLogs(projectLogsUrl: string): Promise<boolean> {
+  const decision = unwrap(
+    await clack.select<"checked" | "later">({
       message: COPY.logs.checkQuestion(projectLogsUrl),
       options: [
         {
-          label: COPY.logs.checked,
+          label: COPY.logs.choices.checked.label,
           value: "checked",
-          hint: COPY.logs.hint,
+          hint: COPY.logs.choices.checked.hint,
+        },
+        {
+          label: COPY.logs.choices.later.label,
+          value: "later",
+          hint: COPY.logs.choices.later.hint,
         },
       ],
     }),
   );
+  return decision === "checked";
 }
 
-async function confirmProductionApiKey(): Promise<void> {
-  unwrap(
-    await clack.select<"confirmed">({
+async function confirmProductionApiKey(): Promise<boolean> {
+  const decision = unwrap(
+    await clack.select<"confirmed" | "later">({
       message: COPY.productionToken.question,
       options: [
         {
-          label: COPY.productionToken.confirmed,
+          label: COPY.productionToken.choices.confirmed.label,
           value: "confirmed",
-          hint: COPY.productionToken.hint,
+          hint: COPY.productionToken.choices.confirmed.hint,
+        },
+        {
+          label: COPY.productionToken.choices.later.label,
+          value: "later",
+          hint: COPY.productionToken.choices.later.hint,
         },
       ],
     }),
   );
+  return decision === "confirmed";
 }
 
 type InstrumentationResult = {
   readonly tracePermalink: string | undefined;
-  readonly outcome: "completed" | "failed";
-};
+} & (
+  | {
+      readonly outcome: "completed";
+      readonly instrumentationResult:
+        | "completed_with_marker"
+        | "completed_without_marker";
+    }
+  | {
+      readonly outcome: "failed";
+      readonly instrumentationResult: "reported_incomplete" | "nonzero_exit";
+      readonly reasonCode:
+        | "coding_tool_reported_incomplete"
+        | "coding_tool_nonzero_exit";
+    }
+);
 
 async function runInstrumentation(
   deps: WizardDeps,
@@ -986,15 +1195,33 @@ async function runInstrumentation(
     );
   }
 
+  const tracePermalink =
+    readResultFile(resultFilePath) ??
+    extractTracePermalink(toolResult.finalText);
+  if (toolResult.exitCode !== 0) {
+    return {
+      outcome: "failed",
+      instrumentationResult: "nonzero_exit",
+      reasonCode: "coding_tool_nonzero_exit",
+      tracePermalink,
+    };
+  }
+  if (toolResult.finalText.includes("INSTRUMENTATION_INCOMPLETE")) {
+    return {
+      outcome: "failed",
+      instrumentationResult: "reported_incomplete",
+      reasonCode: "coding_tool_reported_incomplete",
+      tracePermalink,
+    };
+  }
   return {
-    outcome:
-      toolResult.exitCode !== 0 ||
-      toolResult.finalText.includes("INSTRUMENTATION_INCOMPLETE")
-        ? "failed"
-        : "completed",
-    tracePermalink:
-      readResultFile(resultFilePath) ??
-      extractTracePermalink(toolResult.finalText),
+    outcome: "completed",
+    instrumentationResult: toolResult.finalText.includes(
+      "INSTRUMENTATION_COMPLETE",
+    )
+      ? "completed_with_marker"
+      : "completed_without_marker",
+    tracePermalink,
   };
 }
 
@@ -1032,7 +1259,13 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
     loginWithWizardSession: (loginArgs) =>
       loginWithWizardSessionRequest({
         appUrl: args.options.appUrl,
-        session: loginArgs.session,
+        // A custom app URL is useful for testing the setup flow, but telemetry
+        // always belongs to the production Braintrust backend. Do not reuse a
+        // production telemetry session against a different auth backend.
+        session:
+          args.options.appUrl === DEFAULT_APP_URL
+            ? loginArgs.session
+            : undefined,
         loginUrlParams: {
           orgId: loginArgs.loginUrlParams?.orgId ?? args.options.orgId,
           projectId: loginArgs.loginUrlParams?.projectId ?? args.options.projId,
@@ -1041,10 +1274,9 @@ export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
         events: loginArgs.events,
       }),
     setupEvents: createWizardEvents({
-      appUrl: args.options.appUrl,
       clientContext,
       createSession: (context, signal) =>
-        createWizardSession(args.options.appUrl, context, signal),
+        createWizardSession(DEFAULT_APP_URL, context, signal),
     }),
     openBrowser,
     writeClipboard: (text) => clipboard.write(text),

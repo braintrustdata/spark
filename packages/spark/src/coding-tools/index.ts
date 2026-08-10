@@ -36,6 +36,7 @@ export async function discoverCodingTools(): Promise<
           installed: false,
           usable: false,
           unavailableReason: `${adapter.command} was not found on PATH.`,
+          unavailableReasonCode: "not_detected",
         };
       }
       return await adapter.status(commandPath);

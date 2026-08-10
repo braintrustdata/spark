@@ -79,6 +79,7 @@ export function claudeStatusFromResult(
     return {
       ...base,
       usable: false,
+      unavailableReasonCode: "status_check_failed",
       unavailableReason:
         firstNonEmptyLine(auth.stderr, auth.stdout) ??
         "Claude Code is not logged in.",
@@ -93,6 +94,7 @@ export function claudeStatusFromResult(
       ...base,
       usable: false,
       authMode: authMethod,
+      unavailableReasonCode: "not_authenticated",
       unavailableReason: "Claude Code is not logged in.",
     };
   }

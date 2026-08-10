@@ -1,6 +1,6 @@
 import pkg from "../package.json" with { type: "json" };
 import type { WizardSessionCreateResponse } from "./auth";
-import type { WizardOptions } from "./options";
+import { DEFAULT_APP_URL, type WizardOptions } from "./options";
 import {
   CLI_SETUP_DOCS_PAGES,
   type CliSetupAuthMode,
@@ -19,6 +19,7 @@ export type {
 export type CliSetupInstrumentationMode = "built_in" | "own_agent" | "manual";
 
 export type CliSetupStepName =
+  | "repository_preflight"
   | "authentication"
   | "credentials_write"
   | "bt_cli_setup"
@@ -50,6 +51,53 @@ export type CliSetupFailureCategory =
   | "cancelled"
   | "unknown";
 
+export type CliSetupReasonCode =
+  | "repository_dirty_declined"
+  | "repository_not_git_declined"
+  | "user_interrupt"
+  | "browser_auth_failed"
+  | "browser_auth_timed_out"
+  | "credentials_write_failed"
+  | "bt_cli_install_declined"
+  | "bt_cli_context_switch_declined"
+  | "bt_cli_install_failed"
+  | "bt_cli_status_failed"
+  | "no_usable_coding_tool"
+  | "built_in_instrumentation_declined"
+  | "coding_tool_nonzero_exit"
+  | "coding_tool_reported_incomplete"
+  | "coding_tool_exception"
+  | "trace_check_cancelled"
+  | "production_setup_cancelled"
+  | "unknown";
+
+export type CliSetupRepositoryState = "clean" | "dirty" | "not_git";
+export type CliSetupRepositoryDecision = "continue" | "cancel" | "not_required";
+
+export type CliSetupCodingToolUnavailableReasonCode =
+  | "not_detected"
+  | "not_authenticated"
+  | "status_check_failed"
+  | "smoke_test_failed"
+  | "unknown";
+
+export type CliSetupCodingToolResult = {
+  readonly toolId: "claude" | "codex";
+  readonly detected: boolean;
+  readonly usable: boolean;
+  readonly unavailableReasonCode?:
+    | CliSetupCodingToolUnavailableReasonCode
+    | undefined;
+};
+
+export type CliSetupInstrumentationResult =
+  | "completed_with_marker"
+  | "completed_without_marker"
+  | "reported_incomplete"
+  | "nonzero_exit"
+  | "exception"
+  | "user_cancellation";
+
 export type WizardEventStep = {
   readonly id: string;
   readonly name: CliSetupStepName;
@@ -58,6 +106,23 @@ export type WizardEventStep = {
 export type WizardEventInstrumentation = {
   readonly mode: CliSetupInstrumentationMode;
   readonly codingTool?: string | undefined;
+};
+
+type WizardStepFinishArgs = {
+  readonly failureCategory?: CliSetupFailureCategory | undefined;
+  readonly instrumentation?: WizardEventInstrumentation | undefined;
+  readonly reasonCode?: CliSetupReasonCode | undefined;
+  readonly repositoryState?: CliSetupRepositoryState | undefined;
+  readonly repositoryDecision?: CliSetupRepositoryDecision | undefined;
+  readonly codingToolResults?: readonly CliSetupCodingToolResult[] | undefined;
+  readonly instrumentationResult?: CliSetupInstrumentationResult | undefined;
+  readonly verificationMethod?: "self_reported" | undefined;
+};
+
+type WizardTerminationArgs = {
+  readonly outcome: "completed" | "cancelled" | "failed";
+  readonly failureCategory?: CliSetupFailureCategory | undefined;
+  readonly reasonCode?: CliSetupReasonCode | undefined;
 };
 
 export type WizardEventsRuntime = {
@@ -73,15 +138,9 @@ export type WizardEventsRuntime = {
   readonly finishStep: (
     step: WizardEventStep,
     outcome: Exclude<CliSetupStepOutcome, "started">,
-    args?: {
-      readonly failureCategory?: CliSetupFailureCategory | undefined;
-      readonly instrumentation?: WizardEventInstrumentation | undefined;
-    },
+    args?: WizardStepFinishArgs,
   ) => void;
-  readonly terminate: (args: {
-    readonly outcome: "completed" | "cancelled" | "failed";
-    readonly failureCategory?: CliSetupFailureCategory | undefined;
-  }) => Promise<void>;
+  readonly terminate: (args: WizardTerminationArgs) => Promise<void>;
 };
 
 type ActiveStep = WizardEventStep & {
@@ -95,21 +154,30 @@ type ActiveStep = WizardEventStep & {
 type StepEventPropertiesBase = {
   readonly step: CliSetupStepName;
   readonly stepSequence: number;
+  readonly clientEventSequence?: number | undefined;
   readonly durationMs?: number | undefined;
   readonly instrumentationMode?: CliSetupInstrumentationMode | undefined;
   readonly codingTool?: string | undefined;
+  readonly repositoryState?: CliSetupRepositoryState | undefined;
+  readonly repositoryDecision?: CliSetupRepositoryDecision | undefined;
+  readonly codingToolResults?: readonly CliSetupCodingToolResult[] | undefined;
+  readonly instrumentationResult?: CliSetupInstrumentationResult | undefined;
+  readonly verificationMethod?: "self_reported" | undefined;
 };
 
 type StepEventProperties =
   | (StepEventPropertiesBase & {
       readonly outcome: "started" | "completed" | "skipped";
+      readonly reasonCode?: CliSetupReasonCode | undefined;
     })
   | (StepEventPropertiesBase & {
       readonly outcome: "failed" | "cancelled";
       readonly failureCategory: CliSetupFailureCategory;
+      readonly reasonCode?: CliSetupReasonCode | undefined;
     });
 
 type TerminatedEventPropertiesBase = {
+  readonly clientEventSequence?: number | undefined;
   readonly currentStep?: CliSetupStepName | undefined;
   readonly durationMs: number;
   readonly instrumentationMode?: CliSetupInstrumentationMode | undefined;
@@ -123,6 +191,7 @@ type TerminatedEventProperties =
   | (TerminatedEventPropertiesBase & {
       readonly outcome: "failed" | "cancelled";
       readonly failureCategory: CliSetupFailureCategory;
+      readonly reasonCode?: CliSetupReasonCode | undefined;
     });
 
 type SetupEventRequest =
@@ -139,8 +208,8 @@ type SetupEventRequest =
       readonly properties: TerminatedEventProperties;
     };
 
-const EVENT_REQUEST_TIMEOUT_MS = 2_000;
-const FINAL_FLUSH_TIMEOUT_MS = 2_000;
+const EVENT_REQUEST_TIMEOUT_MS = 1_500;
+const FINAL_FLUSH_TIMEOUT_MS = 5_000;
 
 const DOCS_SOURCE_PREFIX = "docs_";
 
@@ -181,7 +250,6 @@ export function buildCliSetupClientContext(
 }
 
 export function createWizardEvents(args: {
-  readonly appUrl: string;
   readonly clientContext: CliSetupClientContext;
   readonly createSession: (
     clientContext: CliSetupClientContext,
@@ -206,9 +274,10 @@ export function createWizardEvents(args: {
   const pending = new Set<Promise<void>>();
   const sessionAbortController = new AbortController();
   let sessionPromise: Promise<WizardSessionCreateResponse | undefined>;
+  let terminationPromise: Promise<void> | undefined;
   let started = false;
-  let terminated = false;
   let lastStepSequence = 0;
+  let lastClientEventSequence = 0;
 
   function start(): Promise<WizardSessionCreateResponse | undefined> {
     if (!started) {
@@ -249,7 +318,7 @@ export function createWizardEvents(args: {
       if (!session?.event_token) return;
       try {
         const response = await fetchRequest(
-          `${args.appUrl}/api/cli/wizard-session/event`,
+          `${DEFAULT_APP_URL}/api/cli/wizard-session/event`,
           {
             method: "POST",
             headers: {
@@ -261,7 +330,11 @@ export function createWizardEvents(args: {
             signal: AbortSignal.timeout(EVENT_REQUEST_TIMEOUT_MS),
           },
         );
-        if (!response.ok) void response.body?.cancel();
+        if (response.ok) return;
+        void response.body?.cancel().catch(() => {
+          // Discarding an error response is also best-effort. Some stream
+          // implementations can reject cancellation asynchronously.
+        });
       } catch {
         // Setup event delivery must never interrupt the wizard.
       }
@@ -296,6 +369,7 @@ export function createWizardEvents(args: {
       properties: {
         step: name,
         stepSequence,
+        clientEventSequence: ++lastClientEventSequence,
         outcome: "started",
         ...instrumentationProperties(),
       },
@@ -306,10 +380,7 @@ export function createWizardEvents(args: {
   function finishStep(
     step: WizardEventStep,
     outcome: Exclude<CliSetupStepOutcome, "started">,
-    finishArgs?: {
-      readonly failureCategory?: CliSetupFailureCategory | undefined;
-      readonly instrumentation?: WizardEventInstrumentation | undefined;
-    },
+    finishArgs?: WizardStepFinishArgs,
   ): void {
     const active = activeSteps.get(step.id);
     if (!active) return;
@@ -320,32 +391,35 @@ export function createWizardEvents(args: {
         codingTool: active.codingTool,
       },
     );
-    const properties: StepEventProperties =
-      outcome === "failed" || outcome === "cancelled"
-        ? {
-            step: active.name,
-            stepSequence: active.stepSequence,
-            outcome,
-            durationMs: Math.max(
-              0,
-              Math.round(monotonicNow() - active.startedAtMs),
-            ),
-            ...instrumentation,
-            failureCategory:
-              finishArgs?.failureCategory ??
-              active.defaultFailureCategory ??
-              (outcome === "cancelled" ? "cancelled" : "unknown"),
-          }
-        : {
-            step: active.name,
-            stepSequence: active.stepSequence,
-            outcome,
-            durationMs: Math.max(
-              0,
-              Math.round(monotonicNow() - active.startedAtMs),
-            ),
-            ...instrumentation,
-          };
+    const commonProperties = {
+      step: active.name,
+      stepSequence: active.stepSequence,
+      clientEventSequence: ++lastClientEventSequence,
+      durationMs: Math.max(0, Math.round(monotonicNow() - active.startedAtMs)),
+      ...instrumentation,
+      repositoryState: finishArgs?.repositoryState,
+      repositoryDecision: finishArgs?.repositoryDecision,
+      codingToolResults: finishArgs?.codingToolResults,
+      instrumentationResult: finishArgs?.instrumentationResult,
+      verificationMethod: finishArgs?.verificationMethod,
+      reasonCode: finishArgs?.reasonCode,
+    };
+    let properties: StepEventProperties;
+    if (outcome === "failed" || outcome === "cancelled") {
+      properties = {
+        ...commonProperties,
+        outcome,
+        failureCategory:
+          finishArgs?.failureCategory ??
+          active.defaultFailureCategory ??
+          (outcome === "cancelled" ? "cancelled" : "unknown"),
+      };
+    } else {
+      properties = {
+        ...commonProperties,
+        outcome,
+      };
+    }
     queueEvent({
       occurredAt: now().toISOString(),
       clientContext: contextSnapshot(),
@@ -382,57 +456,70 @@ export function createWizardEvents(args: {
     },
     startStep,
     finishStep,
-    async terminate(termination) {
-      if (terminated) return;
-      terminated = true;
-      const active = [...activeSteps.values()].sort(
-        (a, b) => b.stepSequence - a.stepSequence,
-      );
-      const currentStep = active[0];
-      const failureCategory =
-        termination.failureCategory ??
-        currentStep?.defaultFailureCategory ??
-        (termination.outcome === "cancelled"
-          ? "cancelled"
-          : termination.outcome === "failed"
-            ? "unknown"
-            : undefined);
-      const activeOutcome =
-        termination.outcome === "cancelled" ? "cancelled" : "failed";
-      for (const step of active) {
-        finishStep(step, activeOutcome, {
-          failureCategory:
-            termination.failureCategory ?? step.defaultFailureCategory,
+    terminate(termination) {
+      if (terminationPromise !== undefined) return terminationPromise;
+      terminationPromise = (async () => {
+        const active = [...activeSteps.values()].sort(
+          (a, b) => b.stepSequence - a.stepSequence,
+        );
+        const currentStep = active[0];
+        let failureCategory =
+          termination.failureCategory ?? currentStep?.defaultFailureCategory;
+        if (failureCategory === undefined) {
+          if (termination.outcome === "cancelled") {
+            failureCategory = "cancelled";
+          } else if (termination.outcome === "failed") {
+            failureCategory = "unknown";
+          }
+        }
+        const activeOutcome =
+          termination.outcome === "cancelled" ? "cancelled" : "failed";
+        for (const step of active) {
+          finishStep(step, activeOutcome, {
+            failureCategory:
+              termination.failureCategory ?? step.defaultFailureCategory,
+            reasonCode: termination.reasonCode,
+            ...(activeOutcome === "cancelled" &&
+            termination.reasonCode === "user_interrupt" &&
+            step.name === "instrumentation_run"
+              ? { instrumentationResult: "user_cancellation" as const }
+              : {}),
+          });
+        }
+        const commonProperties = {
+          clientEventSequence: ++lastClientEventSequence,
+          ...(currentStep === undefined
+            ? {}
+            : { currentStep: currentStep.name }),
+          durationMs: Math.max(0, Math.round(monotonicNow() - startedAtMs)),
+          ...instrumentationProperties(),
+        };
+        let properties: TerminatedEventProperties;
+        if (termination.outcome === "completed") {
+          properties = {
+            ...commonProperties,
+            outcome: "completed",
+          };
+        } else {
+          properties = {
+            ...commonProperties,
+            outcome: termination.outcome,
+            failureCategory: failureCategory ?? "unknown",
+            reasonCode: termination.reasonCode,
+          };
+        }
+        queueEvent({
+          occurredAt: now().toISOString(),
+          clientContext: contextSnapshot(),
+          event: "cliSetupTerminated",
+          properties,
         });
-      }
-      const properties: TerminatedEventProperties =
-        termination.outcome === "completed"
-          ? {
-              outcome: "completed",
-              ...(currentStep === undefined
-                ? {}
-                : { currentStep: currentStep.name }),
-              durationMs: Math.max(0, Math.round(monotonicNow() - startedAtMs)),
-              ...instrumentationProperties(),
-            }
-          : {
-              outcome: termination.outcome,
-              ...(currentStep === undefined
-                ? {}
-                : { currentStep: currentStep.name }),
-              durationMs: Math.max(0, Math.round(monotonicNow() - startedAtMs)),
-              ...instrumentationProperties(),
-              failureCategory:
-                failureCategory ??
-                (termination.outcome === "cancelled" ? "cancelled" : "unknown"),
-            };
-      queueEvent({
-        occurredAt: now().toISOString(),
-        clientContext: contextSnapshot(),
-        event: "cliSetupTerminated",
-        properties,
+        await flush();
+      })().catch(() => {
+        // Telemetry is always best-effort and must never affect setup's exit
+        // status, even if an unexpected error escapes the delivery path.
       });
-      await flush();
+      return terminationPromise;
     },
   };
 }

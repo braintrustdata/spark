@@ -29,11 +29,7 @@ import {
   WizardCancelledError,
   type WizardDeps,
 } from "../src/clack-wizard";
-import type {
-  WizardEventInstrumentation,
-  WizardEventStep,
-  WizardEventsRuntime,
-} from "../src/events";
+import type { WizardEventStep, WizardEventsRuntime } from "../src/events";
 
 const clackMock = vi.hoisted(() => ({
   cancelSymbol: Symbol("cancel"),
@@ -122,7 +118,8 @@ vi.mock("@clack/prompts", () => ({
       next === "abort" ||
       next === "confirm" ||
       next === "checked" ||
-      next === "confirmed"
+      next === "confirmed" ||
+      next === "later"
     ) {
       const option = options.options.find((option) => option.value === next);
       if (!option) {
@@ -257,6 +254,7 @@ type SelectAnswer =
   | "confirm"
   | "checked"
   | "confirmed"
+  | "later"
   | typeof CANCEL;
 type TextAnswer = string | typeof CANCEL;
 
@@ -407,11 +405,19 @@ function buildDeps(
 }
 
 function createEventsRecorder() {
+  type FinishStepArgs = NonNullable<
+    Parameters<WizardEventsRuntime["finishStep"]>[2]
+  >;
   const events: string[] = [];
   const finishedSteps: Array<{
     readonly step: WizardEventStep;
-    readonly instrumentation: WizardEventInstrumentation | undefined;
+    readonly instrumentation: FinishStepArgs["instrumentation"];
+    readonly reasonCode: FinishStepArgs["reasonCode"];
+    readonly repositoryState: FinishStepArgs["repositoryState"];
+    readonly repositoryDecision: FinishStepArgs["repositoryDecision"];
   }> = [];
+  const terminations: Array<Parameters<WizardEventsRuntime["terminate"]>[0]> =
+    [];
   let stepId = 0;
   const runtime: WizardEventsRuntime = {
     start: () => {
@@ -437,19 +443,23 @@ function createEventsRecorder() {
       finishedSteps.push({
         step,
         instrumentation: finishArgs?.instrumentation,
+        reasonCode: finishArgs?.reasonCode,
+        repositoryState: finishArgs?.repositoryState,
+        repositoryDecision: finishArgs?.repositoryDecision,
       });
       events.push(
         `step.finish:${step.name}:${outcome}:${finishArgs?.failureCategory ?? ""}`,
       );
     },
     terminate: (termination) => {
+      terminations.push(termination);
       events.push(
         `terminate:${termination.outcome}:${termination.failureCategory ?? ""}`,
       );
       return Promise.resolve();
     },
   };
-  return { events, finishedSteps, runtime };
+  return { events, finishedSteps, terminations, runtime };
 }
 
 function createBraintrustCliStub(
@@ -514,6 +524,8 @@ describe("runClackWizard", () => {
     expect(receivedSessionToken).toBe("session-token");
     expect(events).toEqual([
       "start",
+      "step.start:repository_preflight",
+      "step.finish:repository_preflight:completed:",
       "step.start:authentication",
       "auth:signin",
       "step.finish:authentication:completed:",
@@ -540,13 +552,64 @@ describe("runClackWizard", () => {
     const cwd = createGitTempDir();
     writeFileSync(join(cwd, "existing-work.ts"), "changed\n");
     createPrompts({ selects: ["no"] });
-    const { events, runtime } = createEventsRecorder();
+    const { events, finishedSteps, terminations, runtime } =
+      createEventsRecorder();
 
     await expect(
       runClackWizard(buildDeps({ cwd, setupEvents: runtime })),
     ).rejects.toThrow(WizardCancelledError);
 
-    expect(events).toEqual(["start", "terminate:cancelled:repository_state"]);
+    expect(events).toEqual([
+      "start",
+      "step.start:repository_preflight",
+      "step.finish:repository_preflight:cancelled:repository_state",
+      "terminate:cancelled:repository_state",
+    ]);
+    expect(finishedSteps).toContainEqual(
+      expect.objectContaining({
+        reasonCode: "repository_dirty_declined",
+        repositoryState: "dirty",
+        repositoryDecision: "cancel",
+      }),
+    );
+    expect(terminations).toContainEqual(
+      expect.objectContaining({
+        outcome: "cancelled",
+        reasonCode: "repository_dirty_declined",
+      }),
+    );
+  });
+
+  it("lets users finish local setup before trace and production follow-up", async () => {
+    const { events: promptEvents } = createPrompts({
+      selects: ["yes", "no", "manual", "confirm", "later", "later"],
+    });
+    const { events, finishedSteps, runtime } = createEventsRecorder();
+
+    await runClackWizard(buildDeps({ setupEvents: runtime }));
+
+    expect(
+      finishedSteps.find(({ step }) => step.name === "trace_verification"),
+    ).toMatchObject({ reasonCode: "trace_check_cancelled" });
+    expect(
+      finishedSteps.find(({ step }) => step.name === "production_setup"),
+    ).toMatchObject({ reasonCode: "production_setup_cancelled" });
+    expect(events.at(-1)).toBe("terminate:completed:");
+    expect(promptEvents).toContain("outro:Braintrust local setup complete.");
+    expect(
+      promptEvents.some(
+        (event) =>
+          event.startsWith("select.options:") &&
+          event.includes("Finish trace verification later"),
+      ),
+    ).toBe(true);
+    expect(
+      promptEvents.some(
+        (event) =>
+          event.startsWith("select.options:") &&
+          event.includes("Configure production later"),
+      ),
+    ).toBe(true);
   });
 
   it("tracks CI credential setup without browser authentication", async () => {
@@ -646,7 +709,7 @@ describe("runClackWizard", () => {
       ),
     ).toBe(true);
     expect(events).toContain(
-      "spinner.start:Waiting for you to sign in via the browser...",
+      "spinner.start:Waiting for browser setup (the link remains valid for 15 minutes)...",
     );
     expect(
       events.some((event) =>

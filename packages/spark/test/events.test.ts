@@ -90,7 +90,6 @@ describe("createWizardEvents", () => {
     const createSession = vi.fn().mockResolvedValue(SESSION);
     let monotonicTime = 10;
     const events = createWizardEvents({
-      appUrl: "https://app.test",
       clientContext: CONTEXT,
       createSession,
       fetch: fetchMock,
@@ -122,7 +121,9 @@ describe("createWizardEvents", () => {
     expect(fetchMock).toHaveBeenCalledTimes(5);
     const requests = fetchMock.mock.calls.map((call) => {
       const init = call[1] as RequestInit;
-      expect(call[0]).toBe("https://app.test/api/cli/wizard-session/event");
+      expect(call[0]).toBe(
+        "https://www.braintrust.dev/api/cli/wizard-session/event",
+      );
       expect(init.headers).toEqual({
         Authorization: "Bearer event-token",
         Accept: "application/json",
@@ -165,12 +166,58 @@ describe("createWizardEvents", () => {
         .filter((request) => request.event === "cliSetupStep")
         .map((request) => request.properties.stepSequence),
     ).toEqual([1, 1, 2, 2]);
+    expect(
+      requests.map((request) => request.properties.clientEventSequence),
+    ).toEqual([1, 2, 3, 4, 5]);
+  });
+
+  it("reports repository decisions without local file details", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    const events = createWizardEvents({
+      clientContext: CONTEXT,
+      createSession: () => Promise.resolve(SESSION),
+      fetch: fetchMock,
+    });
+
+    const step = events.startStep("repository_preflight", {
+      failureCategory: "repository_state",
+    });
+    events.finishStep(step, "cancelled", {
+      failureCategory: "repository_state",
+      reasonCode: "repository_dirty_declined",
+      repositoryState: "dirty",
+      repositoryDecision: "cancel",
+    });
+    await events.terminate({
+      outcome: "cancelled",
+      failureCategory: "repository_state",
+      reasonCode: "repository_dirty_declined",
+    });
+
+    const requests = fetchMock.mock.calls.map(
+      (call) =>
+        JSON.parse((call[1] as RequestInit).body as string) as {
+          properties: Record<string, unknown>;
+        },
+    );
+    expect(requests[1]?.properties).toMatchObject({
+      clientEventSequence: 2,
+      repositoryState: "dirty",
+      repositoryDecision: "cancel",
+      reasonCode: "repository_dirty_declined",
+    });
+    expect(requests[2]?.properties).toMatchObject({
+      clientEventSequence: 3,
+      reasonCode: "repository_dirty_declined",
+    });
+    expect(JSON.stringify(requests)).not.toContain("file");
   });
 
   it("does not send events when an older server omits the event token", async () => {
     const fetchMock = vi.fn();
     const events = createWizardEvents({
-      appUrl: "https://app.test",
       clientContext: CONTEXT,
       createSession: () =>
         Promise.resolve({ ...SESSION, event_token: undefined }),
@@ -189,7 +236,6 @@ describe("createWizardEvents", () => {
       .fn()
       .mockResolvedValue(new Response(null, { status: 204 }));
     const events = createWizardEvents({
-      appUrl: "https://app.test",
       clientContext: CONTEXT,
       createSession: () => Promise.resolve(SESSION),
       fetch: fetchMock,
@@ -238,12 +284,10 @@ describe("createWizardEvents", () => {
 
   it("suppresses session and event delivery failures", async () => {
     const failedSessionEvents = createWizardEvents({
-      appUrl: "https://app.test",
       clientContext: CONTEXT,
       createSession: () => Promise.reject(new Error("offline")),
     });
     const failedEventDelivery = createWizardEvents({
-      appUrl: "https://app.test",
       clientContext: CONTEXT,
       createSession: () => Promise.resolve(SESSION),
       fetch: () => Promise.reject(new Error("offline")),
@@ -256,5 +300,94 @@ describe("createWizardEvents", () => {
     await expect(
       failedEventDelivery.terminate({ outcome: "failed" }),
     ).resolves.toBeUndefined();
+  });
+
+  it("does not retry a failed event delivery", async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    const events = createWizardEvents({
+      clientContext: CONTEXT,
+      createSession: () => Promise.resolve(SESSION),
+      fetch: fetchMock,
+    });
+
+    await events.terminate({ outcome: "completed" });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it("sends the current payload when the backend rejects an event", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 400 }));
+    const events = createWizardEvents({
+      clientContext: CONTEXT,
+      createSession: () => Promise.resolve(SESSION),
+      fetch: fetchMock,
+    });
+
+    await events.terminate({
+      outcome: "cancelled",
+      reasonCode: "user_interrupt",
+    });
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const payload = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { properties: Record<string, unknown> };
+    expect(payload.properties).toMatchObject({
+      clientEventSequence: 1,
+      reasonCode: "user_interrupt",
+    });
+  });
+
+  it("suppresses response body cancellation failures", async () => {
+    const cancel = vi.fn().mockRejectedValue(new Error("cancel failed"));
+    const fetchMock = vi.fn(() =>
+      Promise.resolve(
+        new Response(new ReadableStream({ cancel }), {
+          status: 500,
+        }),
+      ),
+    );
+    const events = createWizardEvents({
+      clientContext: CONTEXT,
+      createSession: () => Promise.resolve(SESSION),
+      fetch: fetchMock,
+    });
+
+    await expect(
+      events.terminate({ outcome: "completed" }),
+    ).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it("makes concurrent termination calls await the same flush", async () => {
+    let resolveFetch: ((response: Response) => void) | undefined;
+    const fetchMock = vi.fn(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveFetch = resolve;
+        }),
+    );
+    const events = createWizardEvents({
+      clientContext: CONTEXT,
+      createSession: () => Promise.resolve(SESSION),
+      fetch: fetchMock,
+    });
+
+    const first = events.terminate({
+      outcome: "cancelled",
+      reasonCode: "user_interrupt",
+    });
+    const second = events.terminate({ outcome: "failed" });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+    resolveFetch?.(new Response(null, { status: 204 }));
+
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      undefined,
+      undefined,
+    ]);
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

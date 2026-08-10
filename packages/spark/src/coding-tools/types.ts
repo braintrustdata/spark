@@ -7,6 +7,13 @@ export type CodingToolStatus = {
   readonly installed: boolean;
   readonly usable: boolean;
   readonly unavailableReason?: string | undefined;
+  readonly unavailableReasonCode?:
+    | "not_detected"
+    | "not_authenticated"
+    | "status_check_failed"
+    | "smoke_test_failed"
+    | "unknown"
+    | undefined;
   readonly version?: string | undefined;
   readonly authMode?: string | undefined;
 };

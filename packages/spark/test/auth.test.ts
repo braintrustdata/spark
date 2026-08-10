@@ -137,4 +137,38 @@ describe("createWizardSession", () => {
       "/api/cli/wizard-session/poll",
     );
   });
+
+  it("keeps polling after a transient connection failure", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("offline"))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            status: "complete",
+            api_key: "secret",
+            org_id: "org-id",
+            org_name: "acme",
+            project_id: "project-id",
+            project_name: "demo",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    globalThis.fetch = fetchMock;
+    const login = loginWithWizardSession({
+      appUrl: "https://app.test",
+      session: SESSION,
+      events: {
+        onLoginUrl: vi.fn(),
+        onTryOpenBrowser: () => Promise.resolve(true),
+      },
+    });
+
+    await vi.advanceTimersByTimeAsync(4_000);
+
+    await expect(login).resolves.toMatchObject({ projectId: "project-id" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
 });
