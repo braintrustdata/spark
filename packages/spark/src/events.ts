@@ -108,6 +108,23 @@ export type WizardEventInstrumentation = {
   readonly codingTool?: string | undefined;
 };
 
+type WizardStepFinishArgs = {
+  readonly failureCategory?: CliSetupFailureCategory | undefined;
+  readonly instrumentation?: WizardEventInstrumentation | undefined;
+  readonly reasonCode?: CliSetupReasonCode | undefined;
+  readonly repositoryState?: CliSetupRepositoryState | undefined;
+  readonly repositoryDecision?: CliSetupRepositoryDecision | undefined;
+  readonly codingToolResults?: readonly CliSetupCodingToolResult[] | undefined;
+  readonly instrumentationResult?: CliSetupInstrumentationResult | undefined;
+  readonly verificationMethod?: "self_reported" | undefined;
+};
+
+type WizardTerminationArgs = {
+  readonly outcome: "completed" | "cancelled" | "failed";
+  readonly failureCategory?: CliSetupFailureCategory | undefined;
+  readonly reasonCode?: CliSetupReasonCode | undefined;
+};
+
 export type WizardEventsRuntime = {
   readonly start: () => Promise<WizardSessionCreateResponse | undefined>;
   readonly setAuthMode: (authMode: CliSetupAuthMode) => void;
@@ -121,26 +138,9 @@ export type WizardEventsRuntime = {
   readonly finishStep: (
     step: WizardEventStep,
     outcome: Exclude<CliSetupStepOutcome, "started">,
-    args?: {
-      readonly failureCategory?: CliSetupFailureCategory | undefined;
-      readonly instrumentation?: WizardEventInstrumentation | undefined;
-      readonly reasonCode?: CliSetupReasonCode | undefined;
-      readonly repositoryState?: CliSetupRepositoryState | undefined;
-      readonly repositoryDecision?: CliSetupRepositoryDecision | undefined;
-      readonly codingToolResults?:
-        | readonly CliSetupCodingToolResult[]
-        | undefined;
-      readonly instrumentationResult?:
-        | CliSetupInstrumentationResult
-        | undefined;
-      readonly verificationMethod?: "self_reported" | undefined;
-    },
+    args?: WizardStepFinishArgs,
   ) => void;
-  readonly terminate: (args: {
-    readonly outcome: "completed" | "cancelled" | "failed";
-    readonly failureCategory?: CliSetupFailureCategory | undefined;
-    readonly reasonCode?: CliSetupReasonCode | undefined;
-  }) => Promise<void>;
+  readonly terminate: (args: WizardTerminationArgs) => Promise<void>;
 };
 
 type ActiveStep = WizardEventStep & {
@@ -380,20 +380,7 @@ export function createWizardEvents(args: {
   function finishStep(
     step: WizardEventStep,
     outcome: Exclude<CliSetupStepOutcome, "started">,
-    finishArgs?: {
-      readonly failureCategory?: CliSetupFailureCategory | undefined;
-      readonly instrumentation?: WizardEventInstrumentation | undefined;
-      readonly reasonCode?: CliSetupReasonCode | undefined;
-      readonly repositoryState?: CliSetupRepositoryState | undefined;
-      readonly repositoryDecision?: CliSetupRepositoryDecision | undefined;
-      readonly codingToolResults?:
-        | readonly CliSetupCodingToolResult[]
-        | undefined;
-      readonly instrumentationResult?:
-        | CliSetupInstrumentationResult
-        | undefined;
-      readonly verificationMethod?: "self_reported" | undefined;
-    },
+    finishArgs?: WizardStepFinishArgs,
   ): void {
     const active = activeSteps.get(step.id);
     if (!active) return;
@@ -404,70 +391,35 @@ export function createWizardEvents(args: {
         codingTool: active.codingTool,
       },
     );
-    const properties: StepEventProperties =
-      outcome === "failed" || outcome === "cancelled"
-        ? {
-            step: active.name,
-            stepSequence: active.stepSequence,
-            clientEventSequence: ++lastClientEventSequence,
-            outcome,
-            durationMs: Math.max(
-              0,
-              Math.round(monotonicNow() - active.startedAtMs),
-            ),
-            ...instrumentation,
-            failureCategory:
-              finishArgs?.failureCategory ??
-              active.defaultFailureCategory ??
-              (outcome === "cancelled" ? "cancelled" : "unknown"),
-            ...(finishArgs?.reasonCode === undefined
-              ? {}
-              : { reasonCode: finishArgs.reasonCode }),
-            ...(finishArgs?.repositoryState === undefined
-              ? {}
-              : { repositoryState: finishArgs.repositoryState }),
-            ...(finishArgs?.repositoryDecision === undefined
-              ? {}
-              : { repositoryDecision: finishArgs.repositoryDecision }),
-            ...(finishArgs?.codingToolResults === undefined
-              ? {}
-              : { codingToolResults: finishArgs.codingToolResults }),
-            ...(finishArgs?.instrumentationResult === undefined
-              ? {}
-              : { instrumentationResult: finishArgs.instrumentationResult }),
-            ...(finishArgs?.verificationMethod === undefined
-              ? {}
-              : { verificationMethod: finishArgs.verificationMethod }),
-          }
-        : {
-            step: active.name,
-            stepSequence: active.stepSequence,
-            clientEventSequence: ++lastClientEventSequence,
-            outcome,
-            durationMs: Math.max(
-              0,
-              Math.round(monotonicNow() - active.startedAtMs),
-            ),
-            ...instrumentation,
-            ...(finishArgs?.reasonCode === undefined
-              ? {}
-              : { reasonCode: finishArgs.reasonCode }),
-            ...(finishArgs?.repositoryState === undefined
-              ? {}
-              : { repositoryState: finishArgs.repositoryState }),
-            ...(finishArgs?.repositoryDecision === undefined
-              ? {}
-              : { repositoryDecision: finishArgs.repositoryDecision }),
-            ...(finishArgs?.codingToolResults === undefined
-              ? {}
-              : { codingToolResults: finishArgs.codingToolResults }),
-            ...(finishArgs?.instrumentationResult === undefined
-              ? {}
-              : { instrumentationResult: finishArgs.instrumentationResult }),
-            ...(finishArgs?.verificationMethod === undefined
-              ? {}
-              : { verificationMethod: finishArgs.verificationMethod }),
-          };
+    const commonProperties = {
+      step: active.name,
+      stepSequence: active.stepSequence,
+      clientEventSequence: ++lastClientEventSequence,
+      durationMs: Math.max(0, Math.round(monotonicNow() - active.startedAtMs)),
+      ...instrumentation,
+      repositoryState: finishArgs?.repositoryState,
+      repositoryDecision: finishArgs?.repositoryDecision,
+      codingToolResults: finishArgs?.codingToolResults,
+      instrumentationResult: finishArgs?.instrumentationResult,
+      verificationMethod: finishArgs?.verificationMethod,
+      reasonCode: finishArgs?.reasonCode,
+    };
+    let properties: StepEventProperties;
+    if (outcome === "failed" || outcome === "cancelled") {
+      properties = {
+        ...commonProperties,
+        outcome,
+        failureCategory:
+          finishArgs?.failureCategory ??
+          active.defaultFailureCategory ??
+          (outcome === "cancelled" ? "cancelled" : "unknown"),
+      };
+    } else {
+      properties = {
+        ...commonProperties,
+        outcome,
+      };
+    }
     queueEvent({
       occurredAt: now().toISOString(),
       clientContext: contextSnapshot(),
@@ -511,14 +463,15 @@ export function createWizardEvents(args: {
           (a, b) => b.stepSequence - a.stepSequence,
         );
         const currentStep = active[0];
-        const failureCategory =
-          termination.failureCategory ??
-          currentStep?.defaultFailureCategory ??
-          (termination.outcome === "cancelled"
-            ? "cancelled"
-            : termination.outcome === "failed"
-              ? "unknown"
-              : undefined);
+        let failureCategory =
+          termination.failureCategory ?? currentStep?.defaultFailureCategory;
+        if (failureCategory === undefined) {
+          if (termination.outcome === "cancelled") {
+            failureCategory = "cancelled";
+          } else if (termination.outcome === "failed") {
+            failureCategory = "unknown";
+          }
+        }
         const activeOutcome =
           termination.outcome === "cancelled" ? "cancelled" : "failed";
         for (const step of active) {
@@ -533,40 +486,28 @@ export function createWizardEvents(args: {
               : {}),
           });
         }
-        const properties: TerminatedEventProperties =
-          termination.outcome === "completed"
-            ? {
-                outcome: "completed",
-                clientEventSequence: ++lastClientEventSequence,
-                ...(currentStep === undefined
-                  ? {}
-                  : { currentStep: currentStep.name }),
-                durationMs: Math.max(
-                  0,
-                  Math.round(monotonicNow() - startedAtMs),
-                ),
-                ...instrumentationProperties(),
-              }
-            : {
-                outcome: termination.outcome,
-                clientEventSequence: ++lastClientEventSequence,
-                ...(currentStep === undefined
-                  ? {}
-                  : { currentStep: currentStep.name }),
-                durationMs: Math.max(
-                  0,
-                  Math.round(monotonicNow() - startedAtMs),
-                ),
-                ...instrumentationProperties(),
-                failureCategory:
-                  failureCategory ??
-                  (termination.outcome === "cancelled"
-                    ? "cancelled"
-                    : "unknown"),
-                ...(termination.reasonCode === undefined
-                  ? {}
-                  : { reasonCode: termination.reasonCode }),
-              };
+        const commonProperties = {
+          clientEventSequence: ++lastClientEventSequence,
+          ...(currentStep === undefined
+            ? {}
+            : { currentStep: currentStep.name }),
+          durationMs: Math.max(0, Math.round(monotonicNow() - startedAtMs)),
+          ...instrumentationProperties(),
+        };
+        let properties: TerminatedEventProperties;
+        if (termination.outcome === "completed") {
+          properties = {
+            ...commonProperties,
+            outcome: "completed",
+          };
+        } else {
+          properties = {
+            ...commonProperties,
+            outcome: termination.outcome,
+            failureCategory: failureCategory ?? "unknown",
+            reasonCode: termination.reasonCode,
+          };
+        }
         queueEvent({
           occurredAt: now().toISOString(),
           clientContext: contextSnapshot(),

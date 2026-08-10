@@ -29,11 +29,7 @@ import {
   WizardCancelledError,
   type WizardDeps,
 } from "../src/clack-wizard";
-import type {
-  WizardEventInstrumentation,
-  WizardEventStep,
-  WizardEventsRuntime,
-} from "../src/events";
+import type { WizardEventStep, WizardEventsRuntime } from "../src/events";
 
 const clackMock = vi.hoisted(() => ({
   cancelSymbol: Symbol("cancel"),
@@ -409,25 +405,16 @@ function buildDeps(
 }
 
 function createEventsRecorder() {
+  type FinishStepArgs = NonNullable<
+    Parameters<WizardEventsRuntime["finishStep"]>[2]
+  >;
   const events: string[] = [];
   const finishedSteps: Array<{
     readonly step: WizardEventStep;
-    readonly instrumentation: WizardEventInstrumentation | undefined;
-    readonly reasonCode:
-      | NonNullable<
-          Parameters<WizardEventsRuntime["finishStep"]>[2]
-        >["reasonCode"]
-      | undefined;
-    readonly repositoryState:
-      | NonNullable<
-          Parameters<WizardEventsRuntime["finishStep"]>[2]
-        >["repositoryState"]
-      | undefined;
-    readonly repositoryDecision:
-      | NonNullable<
-          Parameters<WizardEventsRuntime["finishStep"]>[2]
-        >["repositoryDecision"]
-      | undefined;
+    readonly instrumentation: FinishStepArgs["instrumentation"];
+    readonly reasonCode: FinishStepArgs["reasonCode"];
+    readonly repositoryState: FinishStepArgs["repositoryState"];
+    readonly repositoryDecision: FinishStepArgs["repositoryDecision"];
   }> = [];
   const terminations: Array<Parameters<WizardEventsRuntime["terminate"]>[0]> =
     [];

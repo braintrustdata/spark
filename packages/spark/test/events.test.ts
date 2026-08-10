@@ -315,7 +315,7 @@ describe("createWizardEvents", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it("keeps the current payload when the backend rejects an event", async () => {
+  it("sends the current payload when the backend rejects an event", async () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValue(new Response(null, { status: 400 }));
@@ -331,19 +331,13 @@ describe("createWizardEvents", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledOnce();
-    const payloads = fetchMock.mock.calls.map(
-      (call) =>
-        JSON.parse((call[1] as RequestInit).body as string) as {
-          properties: Record<string, unknown>;
-        },
-    );
-    expect(payloads).toHaveLength(1);
-    for (const payload of payloads) {
-      expect(payload.properties).toMatchObject({
-        clientEventSequence: 1,
-        reasonCode: "user_interrupt",
-      });
-    }
+    const payload = JSON.parse(
+      (fetchMock.mock.calls[0]?.[1] as RequestInit).body as string,
+    ) as { properties: Record<string, unknown> };
+    expect(payload.properties).toMatchObject({
+      clientEventSequence: 1,
+      reasonCode: "user_interrupt",
+    });
   });
 
   it("suppresses response body cancellation failures", async () => {

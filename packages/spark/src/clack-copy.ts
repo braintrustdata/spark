@@ -298,27 +298,30 @@ export const CLACK_WIZARD_COPY = {
     complete: (args: {
       readonly traceConfirmed: boolean;
       readonly productionConfigured: boolean;
-    }) =>
-      [
-        chalk.dim("Braintrust local setup complete."),
-        "",
-        ...(args.traceConfirmed
-          ? []
-          : ["Next: Run your application and confirm traces in Braintrust."]),
-        ...(args.productionConfigured
-          ? []
-          : [
-              `Next: Add ${chalk.bold("BRAINTRUST_API_KEY")} to your production environment.`,
-            ]),
-        ...(args.traceConfirmed && args.productionConfigured
-          ? ["You can now use Braintrust in production."]
-          : []),
+    }) => {
+      const lines = [chalk.dim("Braintrust local setup complete."), ""];
+      if (!args.traceConfirmed) {
+        lines.push(
+          "Next: Run your application and confirm traces in Braintrust.",
+        );
+      }
+      if (!args.productionConfigured) {
+        lines.push(
+          `Next: Add ${chalk.bold("BRAINTRUST_API_KEY")} to your production environment.`,
+        );
+      }
+      if (args.traceConfirmed && args.productionConfigured) {
+        lines.push("You can now use Braintrust in production.");
+      }
+      lines.push(
         "",
         `If you encountered any issues during setup, please open an issue at ${GITHUB_ISSUE_URL}.`,
         "",
         chalk.dim(`- Contact support: ${SUPPORT_URL}`),
         chalk.dim(`- Further documentation: ${INSTRUMENTATION_DOCS_URL}`),
-      ].join("\n"),
+      );
+      return lines.join("\n");
+    },
   },
 } as const;
 

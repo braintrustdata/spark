@@ -49,6 +49,7 @@ import {
   type CliSetupCodingToolResult,
   type CliSetupFailureCategory,
   type CliSetupReasonCode,
+  type WizardEventStep,
   type WizardEventsRuntime,
 } from "./events";
 
@@ -261,6 +262,50 @@ async function selectBoolean(args: {
   );
 }
 
+async function confirmRepositoryContinuation(args: {
+  readonly events: WizardEventsRuntime;
+  readonly step: WizardEventStep;
+  readonly state: "dirty" | "not_git";
+  readonly message: string;
+  readonly choices: BooleanSelectChoices;
+  readonly declinedReason:
+    | "repository_dirty_declined"
+    | "repository_not_git_declined";
+}): Promise<void> {
+  let shouldContinue: boolean;
+  try {
+    shouldContinue = await selectBoolean({
+      message: args.message,
+      choices: args.choices,
+      yesFirst: false,
+    });
+  } catch (error) {
+    args.events.finishStep(args.step, "cancelled", {
+      failureCategory: "cancelled",
+      reasonCode: "user_interrupt",
+      repositoryState: args.state,
+      repositoryDecision: "cancel",
+    });
+    throw error;
+  }
+
+  if (!shouldContinue) {
+    args.events.finishStep(args.step, "cancelled", {
+      failureCategory: "repository_state",
+      reasonCode: args.declinedReason,
+      repositoryState: args.state,
+      repositoryDecision: "cancel",
+    });
+    clack.cancel(WIZARD_CANCEL_MESSAGE);
+    throw new WizardCancelledError("repository_state", args.declinedReason);
+  }
+
+  args.events.finishStep(args.step, "completed", {
+    repositoryState: args.state,
+    repositoryDecision: "continue",
+  });
+}
+
 export type WizardResult = {
   readonly orgName: string;
   readonly projectName: string;
@@ -303,74 +348,24 @@ async function runClackWizardFlow(
   });
   const inGitRepo = await isGitRepo(deps.cwd);
   if (!inGitRepo) {
-    let continueOutsideGit: boolean;
-    try {
-      continueOutsideGit = await selectBoolean({
-        message: COPY.gitRepository.outsideRepoWarning,
-        choices: COPY.gitRepository.continueOutsideRepoChoices,
-        yesFirst: false,
-      });
-    } catch (error) {
-      events.finishStep(repositoryStep, "cancelled", {
-        failureCategory: "cancelled",
-        reasonCode: "user_interrupt",
-        repositoryState: "not_git",
-        repositoryDecision: "cancel",
-      });
-      throw error;
-    }
-    if (!continueOutsideGit) {
-      events.finishStep(repositoryStep, "cancelled", {
-        failureCategory: "repository_state",
-        reasonCode: "repository_not_git_declined",
-        repositoryState: "not_git",
-        repositoryDecision: "cancel",
-      });
-      clack.cancel(WIZARD_CANCEL_MESSAGE);
-      throw new WizardCancelledError(
-        "repository_state",
-        "repository_not_git_declined",
-      );
-    }
-    events.finishStep(repositoryStep, "completed", {
-      repositoryState: "not_git",
-      repositoryDecision: "continue",
+    await confirmRepositoryContinuation({
+      events,
+      step: repositoryStep,
+      state: "not_git",
+      message: COPY.gitRepository.outsideRepoWarning,
+      choices: COPY.gitRepository.continueOutsideRepoChoices,
+      declinedReason: "repository_not_git_declined",
     });
   } else {
     const dirtyFiles = await getUncommittedOrUntrackedFiles(deps.cwd);
     if (dirtyFiles.length > 0) {
-      let continueWithDirtyRepo: boolean;
-      try {
-        continueWithDirtyRepo = await selectBoolean({
-          message: COPY.gitRepository.dirtyRepoWarning(dirtyFiles),
-          choices: COPY.gitRepository.continueWithDirtyRepoChoices,
-          yesFirst: false,
-        });
-      } catch (error) {
-        events.finishStep(repositoryStep, "cancelled", {
-          failureCategory: "cancelled",
-          reasonCode: "user_interrupt",
-          repositoryState: "dirty",
-          repositoryDecision: "cancel",
-        });
-        throw error;
-      }
-      if (!continueWithDirtyRepo) {
-        events.finishStep(repositoryStep, "cancelled", {
-          failureCategory: "repository_state",
-          reasonCode: "repository_dirty_declined",
-          repositoryState: "dirty",
-          repositoryDecision: "cancel",
-        });
-        clack.cancel(WIZARD_CANCEL_MESSAGE);
-        throw new WizardCancelledError(
-          "repository_state",
-          "repository_dirty_declined",
-        );
-      }
-      events.finishStep(repositoryStep, "completed", {
-        repositoryState: "dirty",
-        repositoryDecision: "continue",
+      await confirmRepositoryContinuation({
+        events,
+        step: repositoryStep,
+        state: "dirty",
+        message: COPY.gitRepository.dirtyRepoWarning(dirtyFiles),
+        choices: COPY.gitRepository.continueWithDirtyRepoChoices,
+        declinedReason: "repository_dirty_declined",
       });
     } else {
       events.finishStep(repositoryStep, "completed", {
@@ -395,12 +390,15 @@ async function runClackWizardFlow(
         apiUrl: deps.options.apiUrl,
       });
     } else {
-      const authMode =
-        deps.options.orgId !== undefined && deps.options.projId !== undefined
-          ? "signin"
-          : (await hasBraintrustAccount())
-            ? "signin"
-            : "signup";
+      let authMode: WizardSessionLoginUrlParams["authMode"];
+      if (
+        deps.options.orgId !== undefined &&
+        deps.options.projId !== undefined
+      ) {
+        authMode = "signin";
+      } else {
+        authMode = (await hasBraintrustAccount()) ? "signin" : "signup";
+      }
       events.setAuthMode(authMode);
       session = await loginWithBrowser(deps, {
         authMode,
@@ -470,30 +468,29 @@ async function runClackWizardFlow(
     const hasUsableCodingTool = codingToolStatuses.some(
       (status) => status.usable,
     );
-    events.finishStep(
-      codingToolPreflightStep,
-      hasUsableCodingTool ? "completed" : "failed",
-      {
-        ...(hasUsableCodingTool
-          ? {}
-          : {
-              failureCategory: "coding_tool_unavailable" as const,
-              reasonCode: "no_usable_coding_tool" as const,
-            }),
-        codingToolResults: codingToolStatuses.map(
-          (status): CliSetupCodingToolResult => ({
-            toolId: status.id,
-            detected: status.installed,
-            usable: status.usable,
-            ...(status.unavailableReasonCode === undefined
-              ? {}
-              : {
-                  unavailableReasonCode: status.unavailableReasonCode,
-                }),
-          }),
-        ),
-      },
-    );
+    const codingToolResults = codingToolStatuses.map((status) => {
+      const result: CliSetupCodingToolResult = {
+        toolId: status.id,
+        detected: status.installed,
+        usable: status.usable,
+      };
+      if (status.unavailableReasonCode === undefined) return result;
+      return {
+        ...result,
+        unavailableReasonCode: status.unavailableReasonCode,
+      };
+    });
+    if (hasUsableCodingTool) {
+      events.finishStep(codingToolPreflightStep, "completed", {
+        codingToolResults,
+      });
+    } else {
+      events.finishStep(codingToolPreflightStep, "failed", {
+        failureCategory: "coding_tool_unavailable",
+        reasonCode: "no_usable_coding_tool",
+        codingToolResults,
+      });
+    }
   } finally {
     setupSpinner.clear();
   }
@@ -504,20 +501,10 @@ async function runClackWizardFlow(
     warnNoUsableCodingTools(codingToolStatuses);
   }
 
-  const instrumentationSelectionStep = events.startStep(
-    "instrumentation_selection",
-  );
   let instrumentationMode: InstrumentationModeChoice | undefined =
-    await selectInstrumentationMode({
+    await selectAndTrackInstrumentationMode(events, {
       includeBuiltIn: hasUsableCodingTool,
     });
-  const selectedInstrumentation = {
-    mode: eventInstrumentationMode(instrumentationMode),
-  };
-  events.setInstrumentation(selectedInstrumentation);
-  events.finishStep(instrumentationSelectionStep, "completed", {
-    instrumentation: selectedInstrumentation,
-  });
   if (braintrustCliSetup.outcome === "pending") {
     const result = await braintrustCliSetup.backgroundTask.wait(setupSpinner);
     events.finishStep(braintrustCliStep, result.outcome, {
@@ -583,48 +570,27 @@ async function runClackWizardFlow(
           "coding_tool_exception",
         );
       }
-      events.finishStep(instrumentationRunStep, result.outcome, {
-        ...(result.outcome === "failed"
-          ? {
-              failureCategory: "coding_tool_failed" as const,
-              reasonCode: result.reasonCode,
-            }
-          : {}),
-        instrumentationResult: result.instrumentationResult,
-      });
       if (result.outcome === "completed") {
+        events.finishStep(instrumentationRunStep, "completed", {
+          instrumentationResult: result.instrumentationResult,
+        });
         instrumentationMode = undefined;
       } else {
-        const alternateSelectionStep = events.startStep(
-          "instrumentation_selection",
-        );
-        instrumentationMode = await selectInstrumentationMode({
-          includeBuiltIn: false,
+        events.finishStep(instrumentationRunStep, "failed", {
+          failureCategory: "coding_tool_failed",
+          reasonCode: result.reasonCode,
+          instrumentationResult: result.instrumentationResult,
         });
-        const alternateInstrumentation = {
-          mode: eventInstrumentationMode(instrumentationMode),
-        };
-        events.setInstrumentation(alternateInstrumentation);
-        events.finishStep(alternateSelectionStep, "completed", {
-          instrumentation: alternateInstrumentation,
+        instrumentationMode = await selectAndTrackInstrumentationMode(events, {
+          includeBuiltIn: false,
         });
       }
     } else {
       events.finishStep(codingToolConfirmationStep, "skipped", {
         reasonCode: "built_in_instrumentation_declined",
       });
-      const alternateSelectionStep = events.startStep(
-        "instrumentation_selection",
-      );
-      instrumentationMode = await selectInstrumentationMode({
+      instrumentationMode = await selectAndTrackInstrumentationMode(events, {
         includeBuiltIn: false,
-      });
-      const alternateInstrumentation = {
-        mode: eventInstrumentationMode(instrumentationMode),
-      };
-      events.setInstrumentation(alternateInstrumentation);
-      events.finishStep(alternateSelectionStep, "completed", {
-        instrumentation: alternateInstrumentation,
       });
     }
   }
@@ -647,23 +613,25 @@ async function runClackWizardFlow(
     failureCategory: "trace_not_observed",
   });
   const traceConfirmed = await confirmTraceLogs(projectLogsUrl);
-  events.finishStep(
-    traceVerificationStep,
-    traceConfirmed ? "completed" : "skipped",
-    traceConfirmed
-      ? { verificationMethod: "self_reported" }
-      : { reasonCode: "trace_check_cancelled" },
-  );
+  if (traceConfirmed) {
+    events.finishStep(traceVerificationStep, "completed", {
+      verificationMethod: "self_reported",
+    });
+  } else {
+    events.finishStep(traceVerificationStep, "skipped", {
+      reasonCode: "trace_check_cancelled",
+    });
+  }
 
   const productionSetupStep = events.startStep("production_setup");
   const productionConfigured = await confirmProductionApiKey();
-  events.finishStep(
-    productionSetupStep,
-    productionConfigured ? "completed" : "skipped",
-    productionConfigured
-      ? undefined
-      : { reasonCode: "production_setup_cancelled" },
-  );
+  if (productionConfigured) {
+    events.finishStep(productionSetupStep, "completed");
+  } else {
+    events.finishStep(productionSetupStep, "skipped", {
+      reasonCode: "production_setup_cancelled",
+    });
+  }
 
   clack.outro(COPY.outro.complete({ traceConfirmed, productionConfigured }));
 
@@ -760,6 +728,20 @@ async function selectInstrumentationMode(args: {
       ],
     }),
   );
+}
+
+async function selectAndTrackInstrumentationMode(
+  events: WizardEventsRuntime,
+  args: { readonly includeBuiltIn: boolean },
+): Promise<InstrumentationModeChoice> {
+  const step = events.startStep("instrumentation_selection");
+  const choice = await selectInstrumentationMode(args);
+  const instrumentation = {
+    mode: eventInstrumentationMode(choice),
+  };
+  events.setInstrumentation(instrumentation);
+  events.finishStep(step, "completed", { instrumentation });
+  return choice;
 }
 
 function eventInstrumentationMode(
