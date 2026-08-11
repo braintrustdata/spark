@@ -1251,7 +1251,7 @@ async function loginWithCiCredentials(args: {
 export function buildDefaultDeps(args: DefaultDepsArgs): WizardDeps {
   const cwd = args.cwd ?? processCwd();
   const env = args.env ?? process.env;
-  const clientContext = buildCliSetupClientContext(args.options);
+  const clientContext = buildCliSetupClientContext(args.options, env);
   return {
     cwd,
     env,
