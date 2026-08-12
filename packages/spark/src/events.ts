@@ -1,8 +1,11 @@
+import { existsSync } from "node:fs";
+
 import pkg from "../package.json" with { type: "json" };
 import type { WizardSessionCreateResponse } from "./auth";
 import { DEFAULT_APP_URL, type WizardOptions } from "./options";
 import {
   CLI_SETUP_DOCS_PAGES,
+  type CliSetupAgentMarker,
   type CliSetupAuthMode,
   type CliSetupClientContext,
   type CliSetupDocsPage,
@@ -11,6 +14,7 @@ import {
 
 export type {
   CliSetupAuthMode,
+  CliSetupAgentMarker,
   CliSetupClientContext,
   CliSetupDocsPage,
   CliSetupEntryPoint,
@@ -213,6 +217,29 @@ const FINAL_FLUSH_TIMEOUT_MS = 5_000;
 
 const DOCS_SOURCE_PREFIX = "docs_";
 
+const DECLARED_AGENT_MARKERS = {
+  amp: "amp",
+  antigravity: "antigravity",
+  "augment-cli": "augment",
+  augment: "augment",
+  claude: "claude_code",
+  "claude-code": "claude_code",
+  codex: "codex",
+  cursor: "cursor",
+  "cursor-cli": "cursor",
+  devin: "devin",
+  gemini: "gemini_cli",
+  "gemini-cli": "gemini_cli",
+  "github-copilot": "github_copilot",
+  "github-copilot-cli": "github_copilot",
+  github_copilot_vscode_agent: "github_copilot",
+  goose: "goose",
+  opencode: "opencode",
+  replit: "replit",
+} as const satisfies Record<string, CliSetupAgentMarker>;
+
+const FALSY_AGENT_MARKERS = new Set(["0", "false", "no", "off"]);
+
 export function setupAttribution(args: {
   readonly from?: string | undefined;
 }): Pick<CliSetupClientContext, "entryPoint" | "docsPage"> {
@@ -238,14 +265,79 @@ export function setupAttribution(args: {
 
 export function buildCliSetupClientContext(
   options: WizardOptions,
+  env: NodeJS.ProcessEnv = process.env,
+  pathExists: (path: string) => boolean = existsSync,
 ): CliSetupClientContext {
   const ci = options.apiKey !== undefined && options.projectId !== undefined;
+  const declaredAiAgent = env["AI_AGENT"]?.trim().toLowerCase();
+  let agentMarker: CliSetupAgentMarker | undefined =
+    declaredAiAgent && !FALSY_AGENT_MARKERS.has(declaredAiAgent)
+      ? (DECLARED_AGENT_MARKERS[
+          declaredAiAgent as keyof typeof DECLARED_AGENT_MARKERS
+        ] ?? "other")
+      : undefined;
+  if (
+    agentMarker === undefined &&
+    (env["CODEX_THREAD_ID"] || env["CODEX_CI"] || env["CODEX_SANDBOX"])
+  ) {
+    agentMarker = "codex";
+  } else if (
+    agentMarker === undefined &&
+    (env["CLAUDECODE"] || env["CLAUDE_CODE"] || env["CLAUDE_CODE_ENTRYPOINT"])
+  ) {
+    agentMarker = "claude_code";
+  } else if (
+    agentMarker === undefined &&
+    (env["CURSOR_AGENT"] ||
+      env["CURSOR_TRACE_ID"] ||
+      env["CURSOR_EXTENSION_HOST_ROLE"] === "agent-exec")
+  ) {
+    agentMarker = "cursor";
+  } else if (agentMarker === undefined && env["GEMINI_CLI"]) {
+    agentMarker = "gemini_cli";
+  } else if (
+    agentMarker === undefined &&
+    (env["OPENCODE"] || env["OPENCODE_CLIENT"])
+  ) {
+    agentMarker = "opencode";
+  } else if (
+    agentMarker === undefined &&
+    (env["VSCODE_AGENT"] ||
+      env["COPILOT_MODEL"] ||
+      env["COPILOT_ALLOW_ALL"] ||
+      env["COPILOT_GITHUB_TOKEN"])
+  ) {
+    agentMarker = "github_copilot";
+  } else if (agentMarker === undefined && env["GOOSE_TERMINAL"]) {
+    agentMarker = "goose";
+  } else if (agentMarker === undefined && env["ANTIGRAVITY_AGENT"]) {
+    agentMarker = "antigravity";
+  } else if (agentMarker === undefined && env["AUGMENT_AGENT"]) {
+    agentMarker = "augment";
+  } else if (agentMarker === undefined && env["REPL_ID"]) {
+    agentMarker = "replit";
+  }
+  const declaredAgent = env["AGENT"]?.trim().toLowerCase();
+  if (
+    agentMarker === undefined &&
+    declaredAgent &&
+    !FALSY_AGENT_MARKERS.has(declaredAgent)
+  ) {
+    agentMarker =
+      DECLARED_AGENT_MARKERS[
+        declaredAgent as keyof typeof DECLARED_AGENT_MARKERS
+      ] ?? "other";
+  }
+  if (agentMarker === undefined && pathExists("/opt/.devin")) {
+    agentMarker = "devin";
+  }
   return {
     cliVersion: pkg.version,
     platform: process.platform,
     architecture: process.arch,
     ...setupAttribution({ from: options.from }),
     ...(ci ? { authMode: "ci" as const } : {}),
+    ...(agentMarker === undefined ? {} : { agentMarker }),
   };
 }
 

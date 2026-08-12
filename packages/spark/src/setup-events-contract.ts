@@ -17,6 +17,20 @@ export const CLI_SETUP_DOCS_PAGES = [
 
 export type CliSetupDocsPage = (typeof CLI_SETUP_DOCS_PAGES)[number];
 export type CliSetupAuthMode = "signin" | "signup" | "ci";
+export type CliSetupAgentMarker =
+  | "amp"
+  | "antigravity"
+  | "augment"
+  | "claude_code"
+  | "codex"
+  | "cursor"
+  | "devin"
+  | "gemini_cli"
+  | "github_copilot"
+  | "goose"
+  | "opencode"
+  | "other"
+  | "replit";
 
 export type CliSetupClientContext = {
   readonly cliVersion: string;
@@ -25,4 +39,5 @@ export type CliSetupClientContext = {
   readonly entryPoint: CliSetupEntryPoint;
   readonly docsPage?: CliSetupDocsPage | undefined;
   readonly authMode?: CliSetupAuthMode | undefined;
+  readonly agentMarker?: CliSetupAgentMarker | undefined;
 };

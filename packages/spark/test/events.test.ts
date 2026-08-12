@@ -22,6 +22,7 @@ const CONTEXT: CliSetupClientContext = {
   platform: "linux",
   architecture: "x64",
   entryPoint: "direct",
+  agentMarker: "cursor",
 };
 
 describe("setupAttribution", () => {
@@ -61,16 +62,19 @@ describe("setupAttribution", () => {
   });
 
   it("builds credential auth context without replacing the entry point", () => {
-    const context = buildCliSetupClientContext({
-      apiUrl: "https://api.test",
-      appUrl: "https://app.test",
-      apiKey: "secret",
-      projectId: "project-id",
-      orgId: undefined,
-      projId: undefined,
-      yolo: false,
-      from: "homepage",
-    });
+    const context = buildCliSetupClientContext(
+      {
+        apiUrl: "https://api.test",
+        appUrl: "https://app.test",
+        apiKey: "secret",
+        projectId: "project-id",
+        orgId: undefined,
+        projId: undefined,
+        yolo: false,
+        from: "homepage",
+      },
+      {},
+    );
 
     expect(context).toMatchObject({
       entryPoint: "homepage",
@@ -79,6 +83,85 @@ describe("setupAttribution", () => {
     expect(context.cliVersion).toMatch(/^\d+\.\d+\.\d+$/);
     expect(context.platform).toBe(process.platform);
     expect(context.architecture).toBe(process.arch);
+  });
+
+  it.each([
+    [{ CODEX_THREAD_ID: "thread-id" }, "codex"],
+    [{ CODEX_CI: "1" }, "codex"],
+    [{ CODEX_SANDBOX: "seatbelt" }, "codex"],
+    [{ CLAUDECODE: "1" }, "claude_code"],
+    [{ CLAUDE_CODE: "1" }, "claude_code"],
+    [{ CLAUDE_CODE_ENTRYPOINT: "cli" }, "claude_code"],
+    [{ CURSOR_AGENT: "1" }, "cursor"],
+    [{ CURSOR_TRACE_ID: "trace-id" }, "cursor"],
+    [{ CURSOR_EXTENSION_HOST_ROLE: "agent-exec" }, "cursor"],
+    [{ GEMINI_CLI: "1" }, "gemini_cli"],
+    [{ OPENCODE: "1" }, "opencode"],
+    [{ OPENCODE_CLIENT: "acp" }, "opencode"],
+    [{ VSCODE_AGENT: "1" }, "github_copilot"],
+    [{ COPILOT_MODEL: "model" }, "github_copilot"],
+    [{ COPILOT_ALLOW_ALL: "1" }, "github_copilot"],
+    [{ COPILOT_GITHUB_TOKEN: "secret" }, "github_copilot"],
+    [{ GOOSE_TERMINAL: "1" }, "goose"],
+    [{ ANTIGRAVITY_AGENT: "1" }, "antigravity"],
+    [{ AUGMENT_AGENT: "1" }, "augment"],
+    [{ REPL_ID: "repl-id" }, "replit"],
+    [{ AI_AGENT: "github_copilot_vscode_agent" }, "github_copilot"],
+    [{ AI_AGENT: "custom-agent" }, "other"],
+    [{ AGENT: "amp" }, "amp"],
+    [{ AGENT: "goose" }, "goose"],
+  ] as const)("reports the coding agent marker from %j", (env, agentMarker) => {
+    const context = buildCliSetupClientContext(
+      {
+        apiUrl: "https://api.test",
+        appUrl: "https://app.test",
+        apiKey: undefined,
+        projectId: undefined,
+        orgId: undefined,
+        projId: undefined,
+        yolo: false,
+      },
+      env,
+      () => false,
+    );
+
+    expect(context.agentMarker).toBe(agentMarker);
+  });
+
+  it("reports Devin from its local environment path", () => {
+    const context = buildCliSetupClientContext(
+      {
+        apiUrl: "https://api.test",
+        appUrl: "https://app.test",
+        apiKey: undefined,
+        projectId: undefined,
+        orgId: undefined,
+        projId: undefined,
+        yolo: false,
+      },
+      {},
+      (path) => path === "/opt/.devin",
+    );
+
+    expect(context.agentMarker).toBe("devin");
+  });
+
+  it("omits the coding agent marker when no supported marker is present", () => {
+    const context = buildCliSetupClientContext(
+      {
+        apiUrl: "https://api.test",
+        appUrl: "https://app.test",
+        apiKey: undefined,
+        projectId: undefined,
+        orgId: undefined,
+        projId: undefined,
+        yolo: false,
+      },
+      { CI: "true", CODEX_HOME: "/tmp/codex" },
+      () => false,
+    );
+
+    expect(context).not.toHaveProperty("agentMarker");
   });
 });
 
@@ -153,7 +236,7 @@ describe("createWizardEvents", () => {
     });
     expect(requests[4]).toMatchObject({
       event: "cliSetupTerminated",
-      clientContext: { authMode: "signin" },
+      clientContext: { authMode: "signin", agentMarker: "cursor" },
       properties: {
         outcome: "completed",
         durationMs: 65,
