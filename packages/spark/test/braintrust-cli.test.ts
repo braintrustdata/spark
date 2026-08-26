@@ -1,143 +1,99 @@
+import { createServer } from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { createBraintrustCliRuntime } from "../src/braintrust-cli";
 
 describe("Braintrust CLI runtime", () => {
-  it("builds the Unix installer command", async () => {
-    const calls: Array<{
-      readonly command: string;
-      readonly args: readonly string[];
-      readonly env?: NodeJS.ProcessEnv;
-    }> = [];
-    const runtime = createBraintrustCliRuntime({
-      platform: "darwin",
-      env: { PATH: "/usr/bin" },
-      exec: (spec) => {
-        calls.push(spec);
-        return Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: "",
-          stderr: "",
-        });
-      },
-    });
+  it("configures and reads context using the real bt CLI", async () => {
+    const home = await mkdtemp(join(tmpdir(), "braintrust-cli-test-"));
+    const server = createServer((request, response) => {
+      response.setHeader("content-type", "application/json");
 
-    await runtime.install();
-
-    expect(calls).toEqual([
-      {
-        command: "sh",
-        args: [
-          "-c",
-          "curl -fsSL https://bt.dev/cli/install.sh | bash -s -- --quiet",
-        ],
-        env: { PATH: "/usr/bin" },
-      },
-    ]);
-  });
-
-  it("builds the update command", async () => {
-    const calls: Array<{
-      readonly command: string;
-      readonly args: readonly string[];
-      readonly env?: NodeJS.ProcessEnv;
-    }> = [];
-    const runtime = createBraintrustCliRuntime({
-      env: { PATH: "/usr/bin" },
-      exec: (spec) => {
-        calls.push(spec);
-        return Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: "",
-          stderr: "",
-        });
-      },
-    });
-
-    await runtime.update("/usr/local/bin/bt");
-
-    expect(calls).toEqual([
-      {
-        command: "/usr/local/bin/bt",
-        args: ["self", "update"],
-        env: { PATH: "/usr/bin" },
-      },
-    ]);
-  });
-
-  it("passes the API key only through env when configuring auth and context", async () => {
-    const calls: Array<{
-      readonly command: string;
-      readonly args: readonly string[];
-      readonly env?: NodeJS.ProcessEnv;
-    }> = [];
-    const runtime = createBraintrustCliRuntime({
-      env: { PATH: "/usr/bin" },
-      exec: (spec) => {
-        calls.push(spec);
-        return Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: "",
-          stderr: "",
-        });
-      },
-    });
-
-    await runtime.loginAndSwitch("/usr/local/bin/bt", {
-      apiKey: "bt-secret-key",
-      apiUrl: "https://api.test",
-      appUrl: "https://app.test",
-      orgName: "acme",
-      projectName: "demo",
-    });
-
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.args).toEqual([
-      "login",
-      "--profile=acme",
-      "--no-input",
-      "--quiet",
-    ]);
-    expect(calls[1]?.args).toEqual([
-      "switch",
-      "--profile=acme",
-      "--org=acme",
-      "--no-input",
-      "--quiet",
-      "--global",
-      "demo",
-    ]);
-    expect(calls.flatMap((call) => [...call.args])).not.toContain(
-      "bt-secret-key",
-    );
-    expect(calls[0]?.env?.["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
-    expect(calls[0]?.env?.["BRAINTRUST_API_URL"]).toBe("https://api.test");
-    expect(calls[0]?.env?.["BRAINTRUST_APP_URL"]).toBe("https://app.test");
-    expect(calls[1]?.env?.["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
-  });
-
-  it("parses bt status JSON", async () => {
-    const runtime = createBraintrustCliRuntime({
-      exec: () =>
-        Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: JSON.stringify({
-            profile: "work",
-            org: "acme",
-            project: "demo",
+      if (request.method === "POST" && request.url === "/api/apikey/login") {
+        response.end(
+          JSON.stringify({
+            org_info: [
+              {
+                id: "org-id",
+                name: "acme",
+                api_url: serverUrl(server),
+              },
+            ],
           }),
-          stderr: "",
-        }),
+        );
+        return;
+      }
+
+      if (
+        request.method === "GET" &&
+        request.url === "/v1/project?org_name=acme&project_name=demo"
+      ) {
+        response.end(
+          JSON.stringify({
+            objects: [{ id: "project-id", name: "demo", org_id: "org-id" }],
+          }),
+        );
+        return;
+      }
+
+      response.statusCode = 404;
+      response.end(JSON.stringify({ error: "not found" }));
     });
 
-    await expect(runtime.status("/bin/bt")).resolves.toEqual({
-      profile: "work",
-      org: "acme",
-      project: "demo",
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(0, "127.0.0.1", resolve);
     });
+
+    try {
+      const url = serverUrl(server);
+      const runtime = createBraintrustCliRuntime({
+        env: {
+          ...process.env,
+          HOME: home,
+          XDG_CONFIG_HOME: join(home, ".config"),
+          BRAINTRUST_API_URL: url,
+          BRAINTRUST_APP_URL: url,
+        },
+      });
+      const discovery = await runtime.discover();
+
+      expect(discovery).toMatchObject({ installed: true });
+      expect(discovery.commandPath).toBeDefined();
+      expect(discovery.version).toBeDefined();
+
+      await runtime.loginAndSwitch(discovery.commandPath!, {
+        apiKey: "bt-secret-key",
+        apiUrl: url,
+        appUrl: url,
+        orgName: "acme",
+        projectName: "demo",
+      });
+
+      await expect(
+        runtime.status(discovery.commandPath!),
+      ).resolves.toMatchObject({
+        profile: "acme",
+        org: "acme",
+        project: "demo",
+      });
+    } finally {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      await rm(home, { recursive: true, force: true });
+    }
   });
 });
+
+function serverUrl(server: ReturnType<typeof createServer>): string {
+  const address = server.address();
+  if (!address || typeof address === "string") {
+    throw new Error("Test API server is not listening on a TCP port.");
+  }
+  return `http://127.0.0.1:${address.port}`;
+}
