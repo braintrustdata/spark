@@ -173,7 +173,6 @@ export function createBraintrustCliRuntime(
           args: [
             "login",
             `--profile=${profileName}`,
-            `--org=${args.orgName}`,
             "--no-input",
             "--quiet",
           ],
