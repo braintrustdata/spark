@@ -1,3 +1,5 @@
+import { URL } from "node:url";
+
 /**
  * URL formats from /workspace/bt-main/skills/sdk-install/braintrust-url-formats.md.
  * `appUrl` here is the *base* (e.g. https://www.braintrust.dev) — the docs reference
@@ -14,10 +16,13 @@ export function buildLogsPermalink(
   appUrl: string,
   trace: TraceLocation,
 ): string {
-  const base = `${appUrl}/app/${encodeURIComponent(trace.org)}/p/${encodeURIComponent(trace.project)}/logs`;
-  const params = new URLSearchParams({ r: trace.rootSpanId });
+  const url = new URL(
+    `/app/${encodeURIComponent(trace.org)}/p/${encodeURIComponent(trace.project)}/logs`,
+    appUrl,
+  );
+  url.searchParams.set("r", trace.rootSpanId);
   if (trace.spanId) {
-    params.set("s", trace.spanId);
+    url.searchParams.set("s", trace.spanId);
   }
-  return `${base}?${params.toString()}`;
+  return url.href;
 }

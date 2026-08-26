@@ -1,3 +1,5 @@
+import { URL } from "node:url";
+
 import type { CliSetupClientContext } from "./setup-events-contract";
 
 export type WizardSessionCreateResponse = {
@@ -81,7 +83,8 @@ export async function createWizardSession(
   clientContext?: WizardSessionCreateClientContext,
   signal?: AbortSignal,
 ): Promise<WizardSessionCreateResponse> {
-  const res = await fetch(`${appUrl}/api/cli/wizard-session/create`, {
+  const url = new URL("/api/cli/wizard-session/create", appUrl);
+  const res = await fetch(url.href, {
     method: "POST",
     headers: {
       Accept: "application/json",
@@ -137,10 +140,11 @@ export async function pollWizardSession(args: {
   const deadline = Date.now() + POLL_HARD_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await sleep(interval);
-    const url = `${args.appUrl}/api/cli/wizard-session/poll?session_token=${encodeURIComponent(args.sessionToken)}`;
+    const url = new URL("/api/cli/wizard-session/poll", args.appUrl);
+    url.searchParams.set("session_token", args.sessionToken);
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await fetch(url.href, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${args.pollToken}`,

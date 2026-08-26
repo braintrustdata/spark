@@ -1,5 +1,6 @@
 import { cwd as processCwd } from "node:process";
 import { relative } from "node:path";
+import { URL } from "node:url";
 
 import * as clack from "@clack/prompts";
 import clipboard from "clipboardy";
@@ -608,7 +609,10 @@ async function runClackWizardFlow(
     events.finishStep(instrumentationRunStep, "completed");
   }
 
-  const projectLogsUrl = `${deps.options.appUrl}/app/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`;
+  const projectLogsUrl = new URL(
+    `/app/${encodeURIComponent(session.orgName)}/p/${encodeURIComponent(session.projectName)}/logs`,
+    deps.options.appUrl,
+  ).href;
   const traceVerificationStep = events.startStep("trace_verification", {
     failureCategory: "trace_not_observed",
   });

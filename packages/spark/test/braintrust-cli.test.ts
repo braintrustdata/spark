@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { URL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -20,7 +21,7 @@ describe("Braintrust CLI runtime", () => {
               {
                 id: "org-id",
                 name: "acme",
-                api_url: serverUrl(server),
+                api_url: serverUrl(server).href,
               },
             ],
           }),
@@ -56,8 +57,8 @@ describe("Braintrust CLI runtime", () => {
           ...process.env,
           HOME: home,
           XDG_CONFIG_HOME: join(home, ".config"),
-          BRAINTRUST_API_URL: url,
-          BRAINTRUST_APP_URL: url,
+          BRAINTRUST_API_URL: url.href,
+          BRAINTRUST_APP_URL: url.href,
         },
       });
       const discovery = await runtime.discover();
@@ -68,8 +69,8 @@ describe("Braintrust CLI runtime", () => {
 
       await runtime.loginAndSwitch(discovery.commandPath!, {
         apiKey: "bt-secret-key",
-        apiUrl: url,
-        appUrl: url,
+        apiUrl: url.href,
+        appUrl: url.href,
         orgName: "acme",
         projectName: "demo",
       });
@@ -90,10 +91,12 @@ describe("Braintrust CLI runtime", () => {
   });
 });
 
-function serverUrl(server: ReturnType<typeof createServer>): string {
+function serverUrl(server: ReturnType<typeof createServer>): URL {
   const address = server.address();
   if (!address || typeof address === "string") {
     throw new Error("Test API server is not listening on a TCP port.");
   }
-  return `http://127.0.0.1:${address.port}`;
+  const url = new URL("http://127.0.0.1");
+  url.port = String(address.port);
+  return url;
 }

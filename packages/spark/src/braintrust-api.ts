@@ -1,3 +1,5 @@
+import { URL } from "node:url";
+
 export type Org = {
   readonly id: string;
   readonly name: string;
@@ -22,7 +24,8 @@ export class BraintrustApiClient {
     path: string,
     body?: unknown,
   ): Promise<T> {
-    const res = await fetch(`${this.apiUrl}${path}`, {
+    const url = new URL(path, this.apiUrl);
+    const res = await fetch(url.href, {
       method,
       headers: {
         Authorization: `Bearer ${this.token}`,

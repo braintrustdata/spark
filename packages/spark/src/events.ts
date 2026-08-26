@@ -1,4 +1,5 @@
 import { existsSync } from "node:fs";
+import { URL } from "node:url";
 
 import pkg from "../package.json" with { type: "json" };
 import type { WizardSessionCreateResponse } from "./auth";
@@ -409,19 +410,17 @@ export function createWizardEvents(args: {
       const session = await start();
       if (!session?.event_token) return;
       try {
-        const response = await fetchRequest(
-          `${DEFAULT_APP_URL}/api/cli/wizard-session/event`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${session.event_token}`,
-              Accept: "application/json",
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify(event),
-            signal: AbortSignal.timeout(EVENT_REQUEST_TIMEOUT_MS),
+        const url = new URL("/api/cli/wizard-session/event", DEFAULT_APP_URL);
+        const response = await fetchRequest(url.href, {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session.event_token}`,
+            Accept: "application/json",
+            "Content-Type": "application/json",
           },
-        );
+          body: JSON.stringify(event),
+          signal: AbortSignal.timeout(EVENT_REQUEST_TIMEOUT_MS),
+        });
         if (response.ok) return;
         void response.body?.cancel().catch(() => {
           // Discarding an error response is also best-effort. Some stream
