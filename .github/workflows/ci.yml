@@ -87,6 +87,8 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Run tests
+        env:
+          BRAINTRUST_SERVICE_TOKEN: ${{ secrets.BRAINTRUST_SERVICE_TOKEN }}
         run: pnpm test
 
   lint:

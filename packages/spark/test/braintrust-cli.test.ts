@@ -1,4 +1,3 @@
-import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,96 +6,99 @@ import { URL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { createBraintrustCliRuntime } from "../src/braintrust-cli";
+import { DEFAULT_API_URL, DEFAULT_APP_URL } from "../src/options";
 
 describe("Braintrust CLI runtime", () => {
-  it("configures and reads context using the real bt CLI", async () => {
-    const home = await mkdtemp(join(tmpdir(), "braintrust-cli-test-"));
-    const server = createServer((request, response) => {
-      response.setHeader("content-type", "application/json");
-
-      if (request.method === "POST" && request.url === "/api/apikey/login") {
-        response.end(
-          JSON.stringify({
-            org_info: [
-              {
-                id: "org-id",
-                name: "acme",
-                api_url: serverUrl(server).href,
-              },
-            ],
-          }),
-        );
-        return;
+  it.runIf(process.env.CI === "true")(
+    "configures and reads context using the real bt CLI",
+    async () => {
+      const serviceToken = process.env.BRAINTRUST_SERVICE_TOKEN;
+      if (!serviceToken) {
+        throw new Error("BRAINTRUST_SERVICE_TOKEN is required in CI.");
       }
 
-      if (
-        request.method === "GET" &&
-        request.url === "/v1/project?org_name=acme&project_name=demo"
-      ) {
-        response.end(
-          JSON.stringify({
-            objects: [{ id: "project-id", name: "demo", org_id: "org-id" }],
-          }),
-        );
-        return;
+      const target = await discoverTestTarget(serviceToken);
+      const home = await mkdtemp(join(tmpdir(), "braintrust-cli-test-"));
+
+      try {
+        const runtime = createBraintrustCliRuntime({
+          env: {
+            ...process.env,
+            HOME: home,
+            XDG_CONFIG_HOME: join(home, ".config"),
+          },
+        });
+        const discovery = await runtime.discover();
+
+        expect(discovery).toMatchObject({ installed: true });
+        expect(discovery.commandPath).toBeDefined();
+        expect(discovery.version).toBeDefined();
+
+        await runtime.loginAndSwitch(discovery.commandPath!, {
+          apiKey: serviceToken,
+          apiUrl: target.apiUrl,
+          appUrl: DEFAULT_APP_URL,
+          orgName: target.orgName,
+          projectName: target.projectName,
+        });
+
+        await expect(
+          runtime.status(discovery.commandPath!),
+        ).resolves.toMatchObject({
+          profile: target.orgName,
+          org: target.orgName,
+          project: target.projectName,
+        });
+      } finally {
+        await rm(home, { recursive: true, force: true });
       }
-
-      response.statusCode = 404;
-      response.end(JSON.stringify({ error: "not found" }));
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      server.once("error", reject);
-      server.listen(0, "127.0.0.1", resolve);
-    });
-
-    try {
-      const url = serverUrl(server);
-      const runtime = createBraintrustCliRuntime({
-        env: {
-          ...process.env,
-          HOME: home,
-          XDG_CONFIG_HOME: join(home, ".config"),
-          BRAINTRUST_API_URL: url.href,
-          BRAINTRUST_APP_URL: url.href,
-        },
-      });
-      const discovery = await runtime.discover();
-
-      expect(discovery).toMatchObject({ installed: true });
-      expect(discovery.commandPath).toBeDefined();
-      expect(discovery.version).toBeDefined();
-
-      await runtime.loginAndSwitch(discovery.commandPath!, {
-        apiKey: "bt-secret-key",
-        apiUrl: url.href,
-        appUrl: url.href,
-        orgName: "acme",
-        projectName: "demo",
-      });
-
-      await expect(
-        runtime.status(discovery.commandPath!),
-      ).resolves.toMatchObject({
-        profile: "acme",
-        org: "acme",
-        project: "demo",
-      });
-    } finally {
-      await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve())),
-      );
-      await rm(home, { recursive: true, force: true });
-    }
-  });
+    },
+    30_000,
+  );
 });
 
-function serverUrl(server: ReturnType<typeof createServer>): URL {
-  const address = server.address();
-  if (!address || typeof address === "string") {
-    throw new Error("Test API server is not listening on a TCP port.");
+async function discoverTestTarget(serviceToken: string): Promise<{
+  readonly apiUrl: string;
+  readonly orgName: string;
+  readonly projectName: string;
+}> {
+  const loginUrl = new URL("/api/apikey/login", DEFAULT_APP_URL);
+  const loginResponse = await fetch(loginUrl, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${serviceToken}` },
+  });
+  if (!loginResponse.ok) {
+    throw new Error(`Braintrust login failed with ${loginResponse.status}.`);
   }
-  const url = new URL("http://127.0.0.1");
-  url.port = String(address.port);
-  return url;
+
+  const login = (await loginResponse.json()) as {
+    readonly org_info?: readonly {
+      readonly name: string;
+      readonly api_url?: string | null;
+    }[];
+  };
+  const org = login.org_info?.[0];
+  if (!org) throw new Error("The CI service token has no Braintrust org.");
+
+  const apiUrl = org.api_url ?? DEFAULT_API_URL;
+  const projectsUrl = new URL("/v1/project", apiUrl);
+  projectsUrl.searchParams.set("org_name", org.name);
+  const projectsResponse = await fetch(projectsUrl, {
+    headers: { Authorization: `Bearer ${serviceToken}` },
+  });
+  if (!projectsResponse.ok) {
+    throw new Error(
+      `Braintrust project lookup failed with ${projectsResponse.status}.`,
+    );
+  }
+
+  const projects = (await projectsResponse.json()) as {
+    readonly objects?: readonly { readonly name: string }[];
+  };
+  const project = projects.objects?.[0];
+  if (!project) {
+    throw new Error("The CI service token's Braintrust org has no project.");
+  }
+
+  return { apiUrl, orgName: org.name, projectName: project.name };
 }
