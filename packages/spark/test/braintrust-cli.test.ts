@@ -96,12 +96,10 @@ describe("Braintrust CLI runtime", () => {
 
     expect(calls).toHaveLength(2);
     expect(calls[0]?.args).toEqual([
-      "auth",
+      "login",
       "--profile=acme",
-      "--org=acme",
       "--no-input",
       "--quiet",
-      "login",
     ]);
     expect(calls[1]?.args).toEqual([
       "switch",
