@@ -1,143 +1,104 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { URL } from "node:url";
+
 import { describe, expect, it } from "vitest";
 
 import { createBraintrustCliRuntime } from "../src/braintrust-cli";
+import { DEFAULT_API_URL, DEFAULT_APP_URL } from "../src/options";
 
 describe("Braintrust CLI runtime", () => {
-  it("builds the Unix installer command", async () => {
-    const calls: Array<{
-      readonly command: string;
-      readonly args: readonly string[];
-      readonly env?: NodeJS.ProcessEnv;
-    }> = [];
-    const runtime = createBraintrustCliRuntime({
-      platform: "darwin",
-      env: { PATH: "/usr/bin" },
-      exec: (spec) => {
-        calls.push(spec);
-        return Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: "",
-          stderr: "",
+  it.runIf(process.env.CI === "true")(
+    "configures and reads context using the real bt CLI",
+    async () => {
+      const serviceToken = process.env.BRAINTRUST_SERVICE_TOKEN;
+      if (!serviceToken) {
+        throw new Error("BRAINTRUST_SERVICE_TOKEN is required in CI.");
+      }
+
+      const target = await discoverTestTarget(serviceToken);
+      const home = await mkdtemp(join(tmpdir(), "braintrust-cli-test-"));
+
+      try {
+        const runtime = createBraintrustCliRuntime({
+          env: {
+            ...process.env,
+            HOME: home,
+            XDG_CONFIG_HOME: join(home, ".config"),
+          },
         });
-      },
-    });
+        const discovery = await runtime.discover();
 
-    await runtime.install();
+        expect(discovery).toMatchObject({ installed: true });
+        expect(discovery.commandPath).toBeDefined();
+        expect(discovery.version).toBeDefined();
 
-    expect(calls).toEqual([
-      {
-        command: "sh",
-        args: [
-          "-c",
-          "curl -fsSL https://bt.dev/cli/install.sh | bash -s -- --quiet",
-        ],
-        env: { PATH: "/usr/bin" },
-      },
-    ]);
-  });
-
-  it("builds the update command", async () => {
-    const calls: Array<{
-      readonly command: string;
-      readonly args: readonly string[];
-      readonly env?: NodeJS.ProcessEnv;
-    }> = [];
-    const runtime = createBraintrustCliRuntime({
-      env: { PATH: "/usr/bin" },
-      exec: (spec) => {
-        calls.push(spec);
-        return Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: "",
-          stderr: "",
+        await runtime.loginAndSwitch(discovery.commandPath!, {
+          apiKey: serviceToken,
+          apiUrl: target.apiUrl,
+          appUrl: DEFAULT_APP_URL,
+          orgName: target.orgName,
+          projectName: target.projectName,
         });
-      },
-    });
 
-    await runtime.update("/usr/local/bin/bt");
-
-    expect(calls).toEqual([
-      {
-        command: "/usr/local/bin/bt",
-        args: ["self", "update"],
-        env: { PATH: "/usr/bin" },
-      },
-    ]);
-  });
-
-  it("passes the API key only through env when configuring auth and context", async () => {
-    const calls: Array<{
-      readonly command: string;
-      readonly args: readonly string[];
-      readonly env?: NodeJS.ProcessEnv;
-    }> = [];
-    const runtime = createBraintrustCliRuntime({
-      env: { PATH: "/usr/bin" },
-      exec: (spec) => {
-        calls.push(spec);
-        return Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: "",
-          stderr: "",
+        await expect(
+          runtime.status(discovery.commandPath!),
+        ).resolves.toMatchObject({
+          profile: target.orgName,
+          org: target.orgName,
+          project: target.projectName,
         });
-      },
-    });
-
-    await runtime.loginAndSwitch("/usr/local/bin/bt", {
-      apiKey: "bt-secret-key",
-      apiUrl: "https://api.test",
-      appUrl: "https://app.test",
-      orgName: "acme",
-      projectName: "demo",
-    });
-
-    expect(calls).toHaveLength(2);
-    expect(calls[0]?.args).toEqual([
-      "login",
-      "--profile=acme",
-      "--no-input",
-      "--quiet",
-    ]);
-    expect(calls[1]?.args).toEqual([
-      "switch",
-      "--profile=acme",
-      "--org=acme",
-      "--no-input",
-      "--quiet",
-      "--global",
-      "demo",
-    ]);
-    expect(calls.flatMap((call) => [...call.args])).not.toContain(
-      "bt-secret-key",
-    );
-    expect(calls[0]?.env?.["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
-    expect(calls[0]?.env?.["BRAINTRUST_API_URL"]).toBe("https://api.test");
-    expect(calls[0]?.env?.["BRAINTRUST_APP_URL"]).toBe("https://app.test");
-    expect(calls[1]?.env?.["BRAINTRUST_API_KEY"]).toBe("bt-secret-key");
-  });
-
-  it("parses bt status JSON", async () => {
-    const runtime = createBraintrustCliRuntime({
-      exec: () =>
-        Promise.resolve({
-          exitCode: 0,
-          signal: null,
-          stdout: JSON.stringify({
-            profile: "work",
-            org: "acme",
-            project: "demo",
-          }),
-          stderr: "",
-        }),
-    });
-
-    await expect(runtime.status("/bin/bt")).resolves.toEqual({
-      profile: "work",
-      org: "acme",
-      project: "demo",
-    });
-  });
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    30_000,
+  );
 });
+
+async function discoverTestTarget(serviceToken: string): Promise<{
+  readonly apiUrl: string;
+  readonly orgName: string;
+  readonly projectName: string;
+}> {
+  const loginUrl = new URL("/api/apikey/login", DEFAULT_APP_URL);
+  const loginResponse = await fetch(loginUrl, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${serviceToken}` },
+  });
+  if (!loginResponse.ok) {
+    throw new Error(`Braintrust login failed with ${loginResponse.status}.`);
+  }
+
+  const login = (await loginResponse.json()) as {
+    readonly org_info?: readonly {
+      readonly name: string;
+      readonly api_url?: string | null;
+    }[];
+  };
+  const org = login.org_info?.[0];
+  if (!org) throw new Error("The CI service token has no Braintrust org.");
+
+  const apiUrl = org.api_url ?? DEFAULT_API_URL;
+  const projectsUrl = new URL("/v1/project", apiUrl);
+  projectsUrl.searchParams.set("org_name", org.name);
+  const projectsResponse = await fetch(projectsUrl, {
+    headers: { Authorization: `Bearer ${serviceToken}` },
+  });
+  if (!projectsResponse.ok) {
+    throw new Error(
+      `Braintrust project lookup failed with ${projectsResponse.status}.`,
+    );
+  }
+
+  const projects = (await projectsResponse.json()) as {
+    readonly objects?: readonly { readonly name: string }[];
+  };
+  const project = projects.objects?.[0];
+  if (!project) {
+    throw new Error("The CI service token's Braintrust org has no project.");
+  }
+
+  return { apiUrl, orgName: org.name, projectName: project.name };
+}
