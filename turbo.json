@@ -26,7 +26,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": []
+      "outputs": [],
+      "passThroughEnv": ["BRAINTRUST_SERVICE_TOKEN"]
     },
     "lint": {
       "outputs": []

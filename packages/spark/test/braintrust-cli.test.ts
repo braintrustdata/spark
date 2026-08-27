@@ -12,9 +12,9 @@ describe("Braintrust CLI runtime", () => {
   it.runIf(process.env.CI === "true")(
     "configures and reads context using the real bt CLI",
     async () => {
-      const serviceToken = process.env.BRAINTRUST_SERVICE_TOKEN;
+      const serviceToken = process.env.BRAINTRUST_API_KEY_CI;
       if (!serviceToken) {
-        throw new Error("BRAINTRUST_SERVICE_TOKEN is required in CI.");
+        throw new Error("BRAINTRUST_API_KEY_CI is required in CI.");
       }
 
       const target = await discoverTestTarget(serviceToken);
