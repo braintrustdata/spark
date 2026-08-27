@@ -27,7 +27,7 @@
     "test": {
       "dependsOn": ["^build"],
       "outputs": [],
-      "passThroughEnv": ["BRAINTRUST_SERVICE_TOKEN"]
+      "passThroughEnv": ["BRAINTRUST_API_KEY_CI"]
     },
     "lint": {
       "outputs": []
