@@ -9,6 +9,50 @@ import { createBraintrustCliRuntime } from "../src/braintrust-cli";
 import { DEFAULT_API_URL, DEFAULT_APP_URL } from "../src/options";
 
 describe("Braintrust CLI runtime", () => {
+  it("confirms persistence of an environment API key when configuring a profile", async () => {
+    const calls: {
+      command: string;
+      args: readonly string[];
+      env?: NodeJS.ProcessEnv;
+    }[] = [];
+    const runtime = createBraintrustCliRuntime({
+      env: {},
+      exec: (spec) => {
+        calls.push(spec);
+        return Promise.resolve({
+          exitCode: 0,
+          signal: null,
+          stdout: "",
+          stderr: "",
+        });
+      },
+    });
+
+    await runtime.loginAndSwitch("/usr/local/bin/bt", {
+      apiKey: "bt-test-key",
+      apiUrl: "https://api.test",
+      appUrl: "https://app.test",
+      orgName: "acme",
+      projectName: "demo",
+    });
+
+    expect(calls[0]).toMatchObject({
+      command: "/usr/local/bin/bt",
+      args: [
+        "login",
+        "--profile=acme",
+        "--no-input",
+        "--quiet",
+        "--save-env-api-key",
+      ],
+      env: {
+        BRAINTRUST_API_KEY: "bt-test-key",
+        BRAINTRUST_API_URL: "https://api.test",
+        BRAINTRUST_APP_URL: "https://app.test",
+      },
+    });
+  });
+
   it.runIf(process.env.CI === "true")(
     "configures and reads context using the real bt CLI",
     async () => {
