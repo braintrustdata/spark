@@ -170,7 +170,13 @@ export function createBraintrustCliRuntime(
         "Braintrust CLI login",
         {
           command: commandPath,
-          args: ["login", `--profile=${profileName}`, "--no-input", "--quiet"],
+          args: [
+            "login",
+            `--profile=${profileName}`,
+            "--no-input",
+            "--quiet",
+            "--save-env-api-key",
+          ],
           env: childEnv,
         },
         exec,
