@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+# Selected refs must not read or write caches shared with other builds.
+cache-mode: none
+
 concurrency:
   group: prerelease-${{ inputs.target_ref || github.sha }}
   cancel-in-progress: false
@@ -107,6 +110,8 @@ jobs:
           ref: ${{ needs.metadata.outputs.target_sha }}
 
       - uses: ./.github/actions/setup
+        with:
+          cache: "false"
 
       - uses: ./.github/actions/build-binary
         with:

@@ -11,6 +11,9 @@ on:
 permissions:
   contents: read
 
+# Release artifacts must not depend on caches populated by other workflows.
+cache-mode: none
+
 concurrency:
   group: release-v${{ inputs.version }}
   cancel-in-progress: false
@@ -164,6 +167,8 @@ jobs:
           ref: ${{ needs.prepare.outputs.release_sha }}
 
       - uses: ./.github/actions/setup
+        with:
+          cache: "false"
 
       - name: Build CLIs
         run: pnpm build
@@ -217,6 +222,8 @@ jobs:
           ref: ${{ needs.prepare.outputs.release_sha }}
 
       - uses: ./.github/actions/setup
+        with:
+          cache: "false"
 
       - uses: ./.github/actions/build-binary
         with:
