@@ -1,5 +1,10 @@
 name: Setup
 description: Checkout, install pnpm + Node, and install dependencies.
+inputs:
+  cache:
+    description: Cache pnpm dependencies.
+    required: false
+    default: "true"
 runs:
   using: composite
   steps:
@@ -14,7 +19,8 @@ runs:
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e
       with:
         node-version: 26.1.0
-        cache: pnpm
+        cache: ${{ inputs.cache == 'true' && 'pnpm' || '' }}
+        package-manager-cache: false
 
     - name: Install dependencies
       shell: bash
