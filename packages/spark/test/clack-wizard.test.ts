@@ -202,7 +202,7 @@ const WIZARD_CANCEL_MESSAGE = [
   "If you ran into an issue, please open a GitHub issue: https://github.com/braintrustdata/spark/issues/new",
   "",
   "- Contact support: https://www.braintrust.dev/contact",
-  "- Further documentation: https://www.braintrust.dev/docs/instrument",
+  "- Further documentation: https://docs.braintrust.dev/instrument",
 ].join("\n");
 const ACCOUNT_QUESTION = "Do you already have a Braintrust account?";
 const INSTRUMENTATION_MODE_MESSAGE =
@@ -1790,7 +1790,7 @@ describe("runClackWizard", () => {
     expect(
       events.some((event) =>
         event.includes(
-          "https://www.braintrust.dev/docs/instrument/trace-llm-calls",
+          "https://docs.braintrust.dev/instrument/trace-llm-calls",
         ),
       ),
     ).toBe(true);
@@ -1881,7 +1881,7 @@ describe("runClackWizard", () => {
         (event) =>
           event.startsWith("writeRaw:") &&
           !event.includes("Braintrust instrumentation prompt:") &&
-          event.includes("https://www.braintrust.dev/docs/llms.txt") &&
+          event.includes("https://docs.braintrust.dev/llms.txt") &&
           event.includes(
             'Set the project name in the SDK initialization to "demo".',
           ),
@@ -1918,7 +1918,7 @@ describe("runClackWizard", () => {
         (event) =>
           event.startsWith("writeRaw:") &&
           !event.includes("Braintrust instrumentation prompt:") &&
-          event.includes("https://www.braintrust.dev/docs/llms.txt"),
+          event.includes("https://docs.braintrust.dev/llms.txt"),
       ),
     ).toBe(true);
   });

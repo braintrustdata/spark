@@ -9,7 +9,7 @@ const BRAINTRUST_CLI_CONTEXT_FALLBACKS = {
 
 const GITHUB_ISSUE_URL = "https://github.com/braintrustdata/spark/issues/new";
 const SUPPORT_URL = "https://www.braintrust.dev/contact";
-const INSTRUMENTATION_DOCS_URL = "https://www.braintrust.dev/docs/instrument";
+const INSTRUMENTATION_DOCS_URL = "https://docs.braintrust.dev/instrument";
 const DIRTY_GIT_FILE_LIMIT = 20;
 
 export const CLACK_WIZARD_COPY = {
@@ -23,7 +23,7 @@ export const CLACK_WIZARD_COPY = {
       chalk.dim(`- Further documentation: ${INSTRUMENTATION_DOCS_URL}`),
     ].join("\n"),
     instrumentationDocsUrl:
-      "https://www.braintrust.dev/docs/instrument/trace-llm-calls",
+      "https://docs.braintrust.dev/instrument/trace-llm-calls",
   },
 
   welcome: {
@@ -141,7 +141,7 @@ export const CLACK_WIZARD_COPY = {
     configureFailed: (message: string) =>
       `Could not configure Braintrust CLI: ${message}`,
     installedButNotFound:
-      "Braintrust CLI was installed, but the wizard could not find `bt` in PATH or the default install location. Install the CLI manually:\nhttps://www.braintrust.dev/docs/reference/cli/quickstart",
+      "Braintrust CLI was installed, but the wizard could not find `bt` in PATH or the default install location. Install the CLI manually:\nhttps://docs.braintrust.dev/reference/cli/quickstart",
     switchContextQuestion: (args: {
       readonly currentContext: BraintrustCliContext;
       readonly targetContext: BraintrustCliContext;
@@ -265,7 +265,7 @@ export const CLACK_WIZARD_COPY = {
         `If everything is set up correctly, traces will appear in your Braintrust logs:\n${chalk.cyanBright(url)}`,
         "",
         chalk.dim(
-          `If traces are not showing up, visit the troubleshooting guide:\nhttps://www.braintrust.dev/docs/kb/troubleshooting-guides\n`,
+          `If traces are not showing up, visit the troubleshooting guide:\nhttps://docs.braintrust.dev/kb/troubleshooting-guides\n`,
         ),
       ].join("\n"),
     choices: {

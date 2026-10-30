@@ -23,12 +23,12 @@ For each SDK, read the matching page and follow its "Configure tracing" section.
 
 | SDK | Guide |
 | --- | ------|
-| Python | https://www.braintrust.dev/docs/sdks/python/install-and-instrument.md |
-| TypeScript | https://www.braintrust.dev/docs/sdks/typescript/install-and-instrument.md |
-| Go | https://www.braintrust.dev/docs/sdks/go/install-and-instrument.md |
-| Java | https://www.braintrust.dev/docs/sdks/java/install-and-instrument.md |
-| Ruby | https://www.braintrust.dev/docs/sdks/ruby/install-and-instrument.md |
-| C# | https://www.braintrust.dev/docs/sdks/csharp/install-and-instrument.md |
+| Python | https://docs.braintrust.dev/sdks/python/install-and-instrument.md |
+| TypeScript | https://docs.braintrust.dev/sdks/typescript/install-and-instrument.md |
+| Go | https://docs.braintrust.dev/sdks/go/install-and-instrument.md |
+| Java | https://docs.braintrust.dev/sdks/java/install-and-instrument.md |
+| Ruby | https://docs.braintrust.dev/sdks/ruby/install-and-instrument.md |
+| C# | https://docs.braintrust.dev/sdks/csharp/install-and-instrument.md |
 
 ## Step 3: Install and configure the SDK
 
@@ -43,5 +43,5 @@ For each SDK, read the matching page and follow its "Configure tracing" section.
 - Be as concise and readable as possible with your code changes.
 - Do not use the Braintrust CLI (\`bt\`).
 
-Full documentation: https://www.braintrust.dev/docs/llms.txt`;
+Full documentation: https://docs.braintrust.dev/llms.txt`;
 }
